@@ -11,13 +11,17 @@ static int16_t centerX(const char* text, uint8_t textSize) {
     return (240 - textWidth) / 2;
 }
 
-void SpeakerList::drawHeader() {
+void SpeakerList::drawHeader(const char* fullText) {
     tft.fillRect(0, 0, 240, 30, 0x7BEF);
     tft.setFont();
     tft.setTextSize(1);
     tft.setTextColor(ST77XX_WHITE);
-    tft.setCursor(centerX("Speakers", 1), 12);
-    tft.print("Speakers");
+    tft.setCursor(centerX(fullText, 1), 12);
+    tft.print(fullText);
+}
+
+void SpeakerList::drawHeader() {
+    drawHeader("Speakers");
 }
 
 void SpeakerList::drawDeviceRow(int index, const SonosDevice& device, int y) {
@@ -73,5 +77,19 @@ void SpeakerList::draw(Sonos& sonos) {
 void SpeakerList::draw(const std::vector<SonosDevice>& devices) {
     tft.fillScreen(ST77XX_BLACK);
     drawHeader();
+    drawDevices(devices);
+}
+
+void SpeakerList::updateHeader(const char* statusText) {
+    String fullText = String("Speakers (") + statusText + ")";
+    drawHeader(fullText.c_str());
+}
+
+void SpeakerList::clearDeviceList() {
+    tft.fillRect(0, 36, 240, 280 - 36, ST77XX_BLACK);
+}
+
+void SpeakerList::refreshDevices(const std::vector<SonosDevice>& devices) {
+    clearDeviceList();
     drawDevices(devices);
 }
