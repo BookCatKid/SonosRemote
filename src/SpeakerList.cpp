@@ -2,14 +2,9 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include "SpeakerList.h"
+#include "UIGlobals.h"
 
 extern Adafruit_ST7789 tft;
-
-static int16_t centerX(const char* text, uint8_t textSize) {
-    int16_t charWidth = 6 * textSize;
-    int16_t textWidth = strlen(text) * charWidth;
-    return (240 - textWidth) / 2;
-}
 
 void SpeakerList::drawHeader(const char* fullText) {
     tft.fillRect(0, 0, 240, 30, 0x7BEF);
@@ -55,31 +50,39 @@ void SpeakerList::drawDeviceRow(int index, const SonosDevice& device, int y, boo
     tft.print(device.ip);
 }
 
-void SpeakerList::drawDevices(const std::vector<SonosDevice>& devices) {
-    if (devices.size() == 0) {
-        tft.setFont();
-        tft.setTextSize(1);
-        tft.setTextColor(0x7BEF);
-        tft.setCursor(centerX("No speakers found", 1), 140);
-        tft.print("No speakers found");
-        return;
+void SpeakerList::drawScanButton(int y, bool isSelected) {
+    if (isSelected) {
+        tft.fillRect(0, y, 240, 28, 0x07E0); // Greenish for scan
+        tft.drawRect(2, y + 2, 236, 24, ST77XX_WHITE);
+        tft.setTextColor(ST77XX_BLACK);
+    } else {
+        tft.fillRect(0, y, 240, 28, ST77XX_BLACK);
+        tft.drawRect(2, y + 2, 236, 24, 0x07E0);
+        tft.setTextColor(0x07E0);
     }
 
+    tft.setFont();
+    tft.setTextSize(1);
+    const char* label = "SCAN FOR NEW SPEAKERS";
+    tft.setCursor(centerX(label, 1), y + 10);
+    tft.print(label);
+}
+
+void SpeakerList::drawDevices(const std::vector<SonosDevice>& devices) {
     int y = 36;
     int maxVisible = (280 - 36) / 28;
+    int i = 0;
 
-    for (int i = 0; i < (int)devices.size() && i < maxVisible; i++) {
+    for (; i < (int)devices.size() && i < maxVisible - 1; i++) {
         bool isSelected = (i == selectedIndex);
         drawDeviceRow(i, devices[i], y, isSelected);
         y += 28;
     }
 
-    if ((int)devices.size() > maxVisible) {
-        String more = String((int)devices.size() - maxVisible) + " more...";
-        tft.setTextColor(0x7BEF);
-        tft.setCursor(centerX(more.c_str(), 1), 270);
-        tft.print(more);
-    }
+    // Always draw scan button as the last item
+    bool scanSelected = (selectedIndex == (int)devices.size() || selectedIndex == i);
+    // If list is long, we might need better scroll logic, but for now:
+    drawScanButton(y, selectedIndex == (int)devices.size());
 }
 
 void SpeakerList::draw(Sonos& sonos) {

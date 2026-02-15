@@ -17,6 +17,7 @@ private:
     void drawHeader();
     void drawHeader(const char* fullText);
     void drawDeviceRow(int index, const SonosDevice& device, int y, bool isSelected);
+    void drawScanButton(int y, bool isSelected);
     void drawDevices(const std::vector<SonosDevice>& devices);
     void clearDeviceList();
 };

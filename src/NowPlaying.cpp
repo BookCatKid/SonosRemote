@@ -4,17 +4,12 @@
 #include "NowPlaying.h"
 #include "FreeMono9pt7b.h"
 #include "Petme8x8.h"
+#include "UIGlobals.h"
 
 extern Adafruit_ST7789 tft;
 
 extern const unsigned char image_song_cover_bits[];
 extern const unsigned char image_volume_normal_bits[];
-
-static int16_t centerX(const char* text, uint8_t textSize) {
-    int16_t charWidth = 6 * textSize;
-    int16_t textWidth = strlen(text) * charWidth;
-    return (240 - textWidth) / 2;
-}
 
 void NowPlaying::drawStatic() {
     tft.fillScreen(ST77XX_BLACK);
@@ -49,7 +44,7 @@ void NowPlaying::drawTrackInfo(const char* song, const char* artist) {
 
     tft.setFont();
     tft.setTextSize(1);
-    tft.setCursor(centerX(artist, 1), 232);
+    tft.setCursor(centerX(artist, 1), 228);
     tft.print(artist);
 }
 
@@ -63,16 +58,16 @@ void NowPlaying::drawProgressBar(int progress) {
 void NowPlaying::drawVolume(int volume) {
     int width = map(volume, 0, 100, 0, 151);
 
-    tft.fillRect(56, 265, 151, 7, ST77XX_WHITE);
-    tft.fillRect(56, 265, width, 7, ST77XX_BLUE);
+    tft.fillRect(56, 250, 151, 7, ST77XX_WHITE);
+    tft.fillRect(56, 250, width, 7, ST77XX_BLUE);
 
-    tft.drawBitmap(33, 261, image_volume_normal_bits, 18, 16, ST77XX_WHITE);
+    tft.drawBitmap(33, 246, image_volume_normal_bits, 18, 16, ST77XX_WHITE);
 }
 
 void NowPlaying::drawSpeakerInfo(const char* name) {
     tft.fillRect(0, 33, 240, 24, 0x7BEF);
     tft.setFont();
-    tft.setTextSize(3);
-    tft.setCursor(centerX(name, 3), 37);
+    tft.setTextSize(2);
+    tft.setCursor(centerX(name, 2), 37);
     tft.print(name);
 }
