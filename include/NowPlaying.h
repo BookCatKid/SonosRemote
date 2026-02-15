@@ -5,7 +5,7 @@
 class NowPlaying {
 public:
     void drawStatic();
-    void drawStatusBar();
+    void drawStatusBar(const char* statusText);
     void drawAlbumArt();
     void drawTrackInfo(const char* song, const char* artist);
     void drawProgressBar(int progress);

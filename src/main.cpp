@@ -6,6 +6,7 @@
 #include "NowPlaying.h"
 #include "SpeakerList.h"
 #include "secrets.h"
+#include "DeviceCache.h"
 
 #define TFT_CS  D3
 #define TFT_DC  D2
@@ -16,24 +17,22 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 Sonos sonos;
 NowPlaying nowPlaying;
 SpeakerList speakerList;
+DeviceCache deviceCache;
 
 int progress = 0;
 int volume = 50;
+bool needsDiscoveryRefresh = true;
 
-void setup() {
-    Serial.begin(115200);
+void updateStatusBar(const char* status) {
+    nowPlaying.drawStatusBar(status);
+}
 
-    pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
-    tft.init(240, 280);
-    tft.setRotation(0);
+void updateStatusBar(const String& status) {
+    nowPlaying.drawStatusBar(status.c_str());
+}
 
-    tft.fillScreen(ST77XX_BLACK);
-    tft.setFont();
-    tft.setTextSize(1);
-    tft.setTextColor(ST77XX_CYAN);
-    tft.setCursor(60, 140);
-    tft.print("Connecting Wi-Fi...");
+void connectWiFi() {
+    updateStatusBar("WiFi: Connecting...");
 
     WiFi.persistent(true);
     WiFi.mode(WIFI_STA);
@@ -53,27 +52,70 @@ void setup() {
         tft.setTextColor(ST77XX_RED);
         tft.setCursor(72, 140);
         tft.print("Wi-Fi Failed!");
-        return;
+        while (true) { delay(1000); }
     }
 
-    tft.fillScreen(ST77XX_BLACK);
-    tft.setTextColor(ST77XX_CYAN);
-    tft.setCursor(48, 140);
-    tft.print("Discovering Sonos...");
+    updateStatusBar("WiFi: Connected");
+}
+
+void discoverDevices(bool background = false) {
+    if (!background) {
+        updateStatusBar("Sonos: Discovering...");
+    }
 
     SonosConfig config;
     config.discoveryTimeoutMs = 10000;
     sonos.setConfig(config);
     sonos.begin();
+
     SonosResult result = sonos.discoverDevices();
-    if (result != SonosResult::SUCCESS) {
-        tft.fillScreen(ST77XX_BLACK);
-        tft.setTextColor(ST77XX_RED);
-        tft.setCursor(54, 140);
-        tft.print("Discovery failed!");
-        return;
+
+    if (result == SonosResult::SUCCESS) {
+        auto devices = sonos.getDiscoveredDevices();
+        if (devices.size() > 0) {
+            deviceCache.saveDevices(devices);
+            updateStatusBar("Sonos: Found " + String((int)devices.size()) + " speakers");
+        } else {
+            updateStatusBar("Sonos: No speakers");
+        }
+    } else {
+        updateStatusBar("Sonos: Discovery failed");
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    deviceCache.begin();
+
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, HIGH);
+    tft.init(240, 280);
+    tft.setRotation(0);
+
+    tft.fillScreen(ST77XX_BLACK);
+
+    connectWiFi();
+
+    bool loadedFromCache = false;
+    auto cachedDevices = deviceCache.loadDevices();
+
+    if (cachedDevices.size() > 0) {
+        updateStatusBar("Sonos: Loading cached...");
+        std::vector<SonosDevice> devices;
+        for (const auto& cached : cachedDevices) {
+            SonosDevice dev;
+            dev.name = cached.name;
+            dev.ip = cached.ip;
+            devices.push_back(dev);
+        }
+
+        speakerList.draw(devices);
+        updateStatusBar("Sonos: " + String((int)devices.size()) + " speakers (cached)");
+        loadedFromCache = true;
+        delay(1000);
     }
 
+    discoverDevices(loadedFromCache);
     speakerList.draw(sonos);
 }
 

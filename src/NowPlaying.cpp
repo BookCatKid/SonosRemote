@@ -19,18 +19,18 @@ static int16_t centerX(const char* text, uint8_t textSize) {
 void NowPlaying::drawStatic() {
     tft.fillScreen(ST77XX_BLACK);
 
-    drawStatusBar();
+    drawStatusBar("Ready");
     drawAlbumArt();
 }
 
-void NowPlaying::drawStatusBar() {
+void NowPlaying::drawStatusBar(const char* statusText) {
     tft.fillRect(0, 1, 240, 30, 0x7BEF);
     tft.setTextColor(ST77XX_WHITE);
     tft.setFont();
     tft.setTextSize(1);
-    int16_t x = centerX("status bar", 1);
+    int16_t x = centerX(statusText, 1);
     tft.setCursor(x, 12);
-    tft.print("status bar");
+    tft.print(statusText);
 }
 
 void NowPlaying::drawAlbumArt() {
@@ -70,9 +70,9 @@ void NowPlaying::drawVolume(int volume) {
 }
 
 void NowPlaying::drawSpeakerInfo(const char* name) {
-    tft.fillRect(0, 33, 240, 20, 0x7BEF);
+    tft.fillRect(0, 33, 240, 24, 0x7BEF);
     tft.setFont();
-    tft.setTextSize(1);
-    tft.setCursor(centerX(name, 1), 39);
+    tft.setTextSize(3);
+    tft.setCursor(centerX(name, 3), 37);
     tft.print(name);
 }

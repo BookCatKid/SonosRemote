@@ -37,12 +37,7 @@ void SpeakerList::drawDeviceRow(int index, const SonosDevice& device, int y) {
     tft.print(device.ip);
 }
 
-void SpeakerList::draw(Sonos& sonos) {
-    tft.fillScreen(ST77XX_BLACK);
-    drawHeader();
-
-    auto devices = sonos.getDiscoveredDevices();
-
+void SpeakerList::drawDevices(const std::vector<SonosDevice>& devices) {
     if (devices.size() == 0) {
         tft.setFont();
         tft.setTextSize(1);
@@ -66,4 +61,17 @@ void SpeakerList::draw(Sonos& sonos) {
         tft.setCursor(centerX(more.c_str(), 1), 270);
         tft.print(more);
     }
+}
+
+void SpeakerList::draw(Sonos& sonos) {
+    tft.fillScreen(ST77XX_BLACK);
+    drawHeader();
+    auto devices = sonos.getDiscoveredDevices();
+    drawDevices(devices);
+}
+
+void SpeakerList::draw(const std::vector<SonosDevice>& devices) {
+    tft.fillScreen(ST77XX_BLACK);
+    drawHeader();
+    drawDevices(devices);
 }
