@@ -10,6 +10,12 @@ extern Adafruit_ST7789 tft;
 extern const unsigned char image_song_cover_bits[];
 extern const unsigned char image_volume_normal_bits[];
 
+static int16_t centerX(const char* text, uint8_t textSize) {
+    int16_t charWidth = 6 * textSize;
+    int16_t textWidth = strlen(text) * charWidth;
+    return (240 - textWidth) / 2;
+}
+
 void NowPlaying::drawStatic() {
     tft.fillScreen(ST77XX_BLACK);
 
@@ -22,7 +28,8 @@ void NowPlaying::drawStatusBar() {
     tft.setTextColor(ST77XX_WHITE);
     tft.setFont();
     tft.setTextSize(1);
-    tft.setCursor(20, 27);
+    int16_t x = centerX("status bar", 1);
+    tft.setCursor(x, 12);
     tft.print("status bar");
 }
 
@@ -37,12 +44,12 @@ void NowPlaying::drawTrackInfo(const char* song, const char* artist) {
     tft.setFont();
     tft.setTextSize(1);
     tft.fillRect(0, 210, 240, 40, ST77XX_BLACK);
-    tft.setCursor(16, 222);
+    tft.setCursor(centerX(song, 1), 215);
     tft.print(song);
 
     tft.setFont();
     tft.setTextSize(1);
-    tft.setCursor(32, 240);
+    tft.setCursor(centerX(artist, 1), 232);
     tft.print(artist);
 }
 
@@ -66,6 +73,6 @@ void NowPlaying::drawSpeakerInfo(const char* name) {
     tft.fillRect(0, 33, 240, 20, 0x7BEF);
     tft.setFont();
     tft.setTextSize(1);
-    tft.setCursor(36, 47);
+    tft.setCursor(centerX(name, 1), 39);
     tft.print(name);
 }
