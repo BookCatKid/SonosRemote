@@ -5,9 +5,7 @@
 #include <Sonos.h>
 #include "NowPlaying.h"
 #include "SpeakerList.h"
-
-const char* ssid = "REDACTED";
-const char* password = "REDACTED";
+#include "secrets.h"
 
 #define TFT_CS  D3
 #define TFT_DC  D2
@@ -37,10 +35,17 @@ void setup() {
     tft.setCursor(60, 140);
     tft.print("Connecting Wi-Fi...");
 
+    WiFi.persistent(true);
+    WiFi.mode(WIFI_STA);
+#if USE_STATIC_IP
+    WiFi.config(STATIC_IP, GATEWAY, SUBNET);
+#endif
     WiFi.begin(ssid, password);
+    WiFi.setAutoReconnect(true);
+
     unsigned long startAttempt = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
-        delay(500);
+        delay(100);
     }
 
     if (WiFi.status() != WL_CONNECTED) {
