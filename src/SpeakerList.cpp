@@ -24,13 +24,27 @@ void SpeakerList::drawHeader() {
     drawHeader("Speakers");
 }
 
-void SpeakerList::drawDeviceRow(int index, const SonosDevice& device, int y) {
-    tft.fillRect(0, y, 240, 28, ST77XX_BLACK);
-    tft.drawFastHLine(10, y + 27, 220, 0x4208);
+void SpeakerList::setSelectedIndex(int index) {
+    selectedIndex = index;
+}
+
+void SpeakerList::drawDeviceRow(int index, const SonosDevice& device, int y, bool isSelected) {
+    if (isSelected) {
+        tft.fillRect(0, y, 240, 28, 0x4208);
+        tft.drawRect(2, y + 2, 236, 24, ST77XX_WHITE);
+    } else {
+        tft.fillRect(0, y, 240, 28, ST77XX_BLACK);
+        tft.drawFastHLine(10, y + 27, 220, 0x4208);
+    }
 
     tft.setFont();
     tft.setTextSize(1);
-    tft.setTextColor(ST77XX_WHITE);
+
+    if (isSelected) {
+        tft.setTextColor(ST77XX_YELLOW);
+    } else {
+        tft.setTextColor(ST77XX_WHITE);
+    }
 
     String label = String(index + 1) + ". " + device.name;
     tft.setCursor(16, y + 4);
@@ -55,7 +69,8 @@ void SpeakerList::drawDevices(const std::vector<SonosDevice>& devices) {
     int maxVisible = (280 - 36) / 28;
 
     for (int i = 0; i < (int)devices.size() && i < maxVisible; i++) {
-        drawDeviceRow(i, devices[i], y);
+        bool isSelected = (i == selectedIndex);
+        drawDeviceRow(i, devices[i], y, isSelected);
         y += 28;
     }
 

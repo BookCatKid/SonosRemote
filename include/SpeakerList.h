@@ -10,11 +10,13 @@ public:
     void draw(const std::vector<SonosDevice>& devices);
     void updateHeader(const char* statusText);
     void refreshDevices(const std::vector<SonosDevice>& devices);
+    void setSelectedIndex(int index);
 
 private:
+    int selectedIndex = 0;
     void drawHeader();
     void drawHeader(const char* fullText);
-    void drawDeviceRow(int index, const SonosDevice& device, int y);
+    void drawDeviceRow(int index, const SonosDevice& device, int y, bool isSelected);
     void drawDevices(const std::vector<SonosDevice>& devices);
     void clearDeviceList();
 };
