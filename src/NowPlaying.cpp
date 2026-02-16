@@ -166,11 +166,39 @@ void NowPlaying::drawTrackInfo(const char* song, const char* artist, const char*
     }
 }
 
-void NowPlaying::drawProgressBar(int progress) {
-    int width = map(progress, 0, 100, 0, 193);
+static String formatTime(int seconds) {
+    if (seconds < 0) seconds = 0;
+    int m = seconds / 60;
+    int s = seconds % 60;
+    char buf[10];
+    sprintf(buf, "%02d:%02d", m, s);
+    return String(buf);
+}
 
-    tft.fillRect(23, 188, 193, 12, ST77XX_WHITE);
-    tft.fillRect(23, 188, width, 12, 0x5FF3);
+void NowPlaying::drawProgressBar(int position, int duration) {
+    int progress = (duration > 0) ? (position * 100) / duration : 0;
+    if (progress > 100) progress = 100;
+
+    int barWidth = 130;
+    int x = 10;
+    int y = 188;
+    int h = 10;
+
+    int fillWidth = map(progress, 0, 100, 0, barWidth);
+
+    // Draw background and progress
+    tft.fillRect(x, y, barWidth, h, 0x4208); // Dark gray
+    tft.fillRect(x, y, fillWidth, h, 0x5FF3); // Cyan-ish
+
+    // Draw time text: 00:00 / 00:00
+    String timeText = formatTime(position) + " / " + formatTime(duration);
+    tft.setFont();
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_WHITE);
+    // Clear text area
+    tft.fillRect(x + barWidth + 5, y - 2, 240 - (x + barWidth + 5), h + 4, ST77XX_BLACK);
+    tft.setCursor(x + barWidth + 10, y + 1);
+    tft.print(timeText);
 }
 
 void NowPlaying::drawVolume(int volume) {

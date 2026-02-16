@@ -39,6 +39,14 @@ ButtonHandler buttons(mcp, BTN_UP, BTN_DOWN, BTN_CLICK);
 int selectedIndex = 0;
 IPAddress selectedDeviceIP;
 
+// UI State tracking to prevent flickering
+String lastAlbumArtUrl = "";
+String lastTitle = "";
+String lastArtist = "";
+String lastPlaybackState = "";
+int lastProgressPercent = -1;
+int lastVolume = -1;
+
 enum ScreenState {
     SCREEN_SPEAKER_LIST,
     SCREEN_NOW_PLAYING
@@ -110,6 +118,15 @@ void handleSpeakerListNavigation() {
             // Select speaker
             selectedDeviceIP.fromString(devices[selectedIndex].ip.c_str());
             currentScreen = SCREEN_NOW_PLAYING;
+            
+            // Reset state to force full redraw
+            lastAlbumArtUrl = "";
+            lastTitle = "";
+            lastArtist = "";
+            lastPlaybackState = "";
+            lastProgressPercent = -1;
+            lastVolume = -1;
+
             nowPlaying.drawStatic();
             nowPlaying.drawSpeakerInfo(devices[selectedIndex].name.c_str());
             lastRefreshTime = 0; // Force immediate update
@@ -150,19 +167,12 @@ void handleNowPlayingNavigation() {
     }
 }
 
-String lastAlbumArtUrl = "";
-String lastTitle = "";
-String lastArtist = "";
-String lastPlaybackState = "";
-int lastProgressPercent = -1;
-int lastVolume = -1;
-
 void updateNowPlayingScreen() {
     if (wifiState != WIFI_CONNECTED) return;
 
     if (sonosController.update(selectedDeviceIP.toString())) {
         const auto& data = sonosController.getTrackData();
-        
+
         // 1. Update Album Art if changed
         if (data.albumArtUrl != lastAlbumArtUrl) {
             lastAlbumArtUrl = data.albumArtUrl;
@@ -183,7 +193,7 @@ void updateNowPlayingScreen() {
         }
         if (progressPercent != lastProgressPercent) {
             lastProgressPercent = progressPercent;
-            nowPlaying.drawProgressBar(progressPercent);
+            nowPlaying.drawProgressBar(data.position, data.duration);
         }
 
         // 4. Update Volume if changed
