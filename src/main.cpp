@@ -176,10 +176,6 @@ void updateNowPlayingScreen() {
     if (sonosController.update(selectedDeviceIP.toString())) {
         const auto& data = sonosController.getTrackData();
 
-        if (data.albumArtUrl != lastAlbumArtUrl) {
-            lastAlbumArtUrl = data.albumArtUrl;
-            nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
-        }
         if (data.title != lastTitle || data.artist != lastArtist) {
             lastTitle = data.title;
             lastArtist = data.artist;
@@ -198,6 +194,11 @@ void updateNowPlayingScreen() {
         if (data.playbackState != lastPlaybackState) {
             lastPlaybackState = data.playbackState;
             nowPlaying.drawStatusBar(data.playbackState.c_str());
+        }
+        
+        if (data.albumArtUrl != lastAlbumArtUrl) {
+            lastAlbumArtUrl = data.albumArtUrl;
+            nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
         }
     } else {
         nowPlaying.drawStatusBar("Offline");
