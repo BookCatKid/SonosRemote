@@ -39,15 +39,15 @@ void NowPlaying::drawStatusBar(const char* statusText) {
 void NowPlaying::drawAlbumArt() {
     // Placeholder: A stylized vinyl record
     int centerX = 120;
-    int centerY = 122;
-    tft.fillRect(0, 58, 240, 132, ST77XX_BLACK);
-    tft.drawCircle(centerX, centerY, 50, 0x4208); // Outer ring
-    tft.drawCircle(centerX, centerY, 48, 0x4208);
-    tft.drawCircle(centerX, centerY, 15, 0xAD55); // Label
+    int centerY = 105;
+    tft.fillRect(0, 58, 240, 94, ST77XX_BLACK);
+    tft.drawCircle(centerX, centerY, 40, 0x4208); // Outer ring (slightly smaller)
+    tft.drawCircle(centerX, centerY, 38, 0x4208);
+    tft.drawCircle(centerX, centerY, 12, 0xAD55); // Label
     tft.fillCircle(centerX, centerY, 3, ST77XX_WHITE); // Center hole
     
     tft.setTextColor(0x4208);
-    tft.setCursor(centerX - 20, centerY + 55);
+    tft.setCursor(centerX - 20, centerY + 45);
     tft.print("NO ART");
 }
 
@@ -128,9 +128,9 @@ void NowPlaying::drawAlbumArt(const char* url) {
                         int drawW = w / scale;
                         int drawH = h / scale;
                         int x = (240 - drawW) / 2;
-                        int y = 62 + (120 - drawH) / 2;
+                        int y = 58 + (94 - drawH) / 2;
 
-                        tft.fillRect(0, 58, 240, 132, ST77XX_BLACK);
+                        tft.fillRect(0, 58, 240, 94, ST77XX_BLACK);
                         TJpgDec.drawJpg(x, y, buffer, read);
                     } else {
                         drawAlbumArt();
@@ -147,21 +147,50 @@ void NowPlaying::drawAlbumArt(const char* url) {
 
 void NowPlaying::drawTrackInfo(const char* song, const char* artist, const char* album) {
     tft.setTextColor(ST77XX_WHITE);
-    tft.setTextWrap(false);
-
-    tft.fillRect(0, 205, 240, 45, ST77XX_BLACK);
     
+    // Clear the track info area
+    tft.fillRect(0, 180, 240, 70, ST77XX_BLACK);
+    
+    // 1. Draw Song Title with dynamic scaling/wrapping
     tft.setFont();
-    tft.setTextSize(1);
-    tft.setCursor(centerX(song, 1), 208);
-    tft.print(song);
+    uint8_t textSize = 2;
+    int16_t charWidth = 6 * textSize;
+    int16_t maxCharsLine = 240 / charWidth;
+    int16_t songLen = strlen(song);
 
+    if (songLen > maxCharsLine) {
+        // If it's too long for size 2, try size 1 or wrap
+        if (songLen <= (240 / 6)) { // Fits in one line at size 1
+            textSize = 1;
+            tft.setTextSize(1);
+            tft.setCursor(centerX(song, 1), 183);
+            tft.print(song);
+        } else {
+            // Wrap at size 1
+            tft.setTextSize(1);
+            tft.setTextWrap(true);
+            tft.setCursor(5, 183);
+            tft.print(song);
+            tft.setTextWrap(false);
+        }
+    } else {
+        tft.setTextSize(2);
+        tft.setCursor(centerX(song, 2), 183);
+        tft.print(song);
+    }
+
+    // 2. Draw Artist and Album
+    tft.setTextSize(1);
     tft.setTextColor(0xAD55); // Grayish
-    tft.setCursor(centerX(artist, 1), 220);
+    
+    // Determine Y offset based on whether song title likely took 1 or 2 lines
+    int artistY = (textSize == 1 && songLen > (240 / 6)) ? 213 : 210;
+
+    tft.setCursor(centerX(artist, 1), artistY);
     tft.print(artist);
 
     if (album && strlen(album) > 0) {
-        tft.setCursor(centerX(album, 1), 232);
+        tft.setCursor(centerX(album, 1), artistY + 15);
         tft.print(album);
     }
 }
@@ -181,7 +210,7 @@ void NowPlaying::drawProgressBar(int position, int duration) {
 
     int barWidth = 130;
     int x = 10;
-    int y = 188;
+    int y = 162;
     int h = 10;
 
     int fillWidth = map(progress, 0, 100, 0, barWidth);
@@ -204,11 +233,11 @@ void NowPlaying::drawProgressBar(int position, int duration) {
 void NowPlaying::drawVolume(int volume) {
     int width = map(volume, 0, 100, 0, 151);
 
-    tft.fillRect(56, 255, 151, 10, ST77XX_BLACK);
-    tft.fillRect(56, 255, 151, 10, 0x4208);
-    tft.fillRect(56, 255, width, 10, ST77XX_BLUE);
+    tft.fillRect(56, 255, 151, 12, ST77XX_BLACK);
+    tft.fillRect(56, 255, 151, 12, 0x4208);
+    tft.fillRect(56, 255, width, 12, ST77XX_BLUE);
 
-    tft.drawBitmap(33, 252, image_volume_normal_bits, 18, 16, ST77XX_WHITE);
+    tft.drawBitmap(33, 253, image_volume_normal_bits, 18, 16, ST77XX_WHITE);
 }
 
 void NowPlaying::drawSpeakerInfo(const char* name) {
