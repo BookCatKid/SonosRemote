@@ -44,6 +44,9 @@ private:
     std::vector<SonosDevice> _devices;
     SonosConfig _config;
     bool _initialized = false;
+    bool _isDiscovering = false;
+    unsigned long _discoveryStartTime = 0;
+    std::vector<SonosDevice> _newDevices;
     
     // Network constants
     static const char* SSDP_MULTICAST_IP;
@@ -85,6 +88,8 @@ public:
     
     // Device discovery
     SonosResult discoverDevices();
+    void updateDiscovery();
+    bool isDiscovering() const { return _isDiscovering; }
     std::vector<SonosDevice> getDiscoveredDevices() const;
     void setDevices(const std::vector<SonosDevice>& devices) { _devices = devices; }
     SonosDevice* getDeviceByName(const String& name);

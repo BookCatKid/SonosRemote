@@ -118,7 +118,6 @@ void NowPlaying::drawAlbumArt(const char* url) {
                     TJpgDec.setCallback(tft_output);
                     uint16_t w = 0, h = 0;
                     if (TJpgDec.getJpgSize(&w, &h, buffer, read) == JDR_OK) {
-                        // Target max dimension of 80 pixels for a compact look
                         uint8_t scale = 1;
                         if (w > 80 * 4 || h > 80 * 4) scale = 8;
                         else if (w > 80 * 2 || h > 80 * 2) scale = 4;

@@ -115,9 +115,6 @@ SonosResult Sonos::discoverDevices() {
 
     logMessage("Starting device discovery...");
 
-    // Create a temporary list for newly discovered devices
-    std::vector<SonosDevice> newDevices;
-
     // Send SSDP multicast request
     IPAddress multicastIP;
     multicastIP.fromString(SSDP_MULTICAST_IP);
@@ -131,75 +128,78 @@ SonosResult Sonos::discoverDevices() {
         return SonosResult::ERROR_NETWORK;
     }
 
-    // Listen for responses
-    unsigned long startTime = millis();
-    int discoveredCount = 0;
+    _isDiscovering = true;
+    _discoveryStartTime = millis();
+    _newDevices.clear();
+    
+    return SonosResult::SUCCESS;
+}
 
-    while (millis() - startTime < _config.discoveryTimeoutMs) {
-        int packetSize = _udp.parsePacket();
-        if (packetSize > 0) {
-            String response = _udp.readString();
+void Sonos::updateDiscovery() {
+    if (!_isDiscovering) return;
 
-            // Parse SSDP response
-            if (response.indexOf("ZonePlayer") != -1) {
-                // Extract location URL
-                int locationStart = response.indexOf("LOCATION: ") + 10;
-                int locationEnd = response.indexOf("\r\n", locationStart);
-                if (locationStart > 9 && locationEnd > locationStart) {
-                    String locationUrl = response.substring(locationStart, locationEnd);
+    if (millis() - _discoveryStartTime > _config.discoveryTimeoutMs) {
+        _isDiscovering = false;
+        _devices = _newDevices;
+        logMessage("Discovery complete. Found " + String(_devices.size()) + " devices");
+        return;
+    }
 
-                    // Extract IP from URL
-                    int ipStart = locationUrl.indexOf("//") + 2;
-                    int ipEnd = locationUrl.indexOf(":", ipStart);
-                    String deviceIP = locationUrl.substring(ipStart, ipEnd);
+    int packetSize = _udp.parsePacket();
+    if (packetSize > 0) {
+        String response = _udp.readString();
 
-                    if (isValidIP(deviceIP)) {
-                        // Fetch device description
-                        _http.begin(locationUrl);
-                        int httpCode = _http.GET();
+        // Parse SSDP response
+        if (response.indexOf("ZonePlayer") != -1) {
+            // Extract location URL
+            int locationStart = response.indexOf("LOCATION: ") + 10;
+            int locationEnd = response.indexOf("\r\n", locationStart);
+            if (locationStart > 9 && locationEnd > locationStart) {
+                String locationUrl = response.substring(locationStart, locationEnd);
 
-                        if (httpCode == HTTP_CODE_OK) {
-                            String xmlResponse = _http.getString();
-                            SonosDevice device;
+                // Extract IP from URL
+                int ipStart = locationUrl.indexOf("//") + 2;
+                int ipEnd = locationUrl.indexOf(":", ipStart);
+                String deviceIP = locationUrl.substring(ipStart, ipEnd);
 
-                            if (parseDeviceDescription(xmlResponse, device)) {
-                                device.ip = deviceIP;
+                if (isValidIP(deviceIP)) {
+                    // Fetch device description
+                    _http.begin(locationUrl);
+                    int httpCode = _http.GET();
 
-                                // Check if device already exists in new list
-                                bool deviceExists = false;
-                                for (auto& existingDevice : newDevices) {
-                                    if (existingDevice.ip == device.ip) {
-                                        existingDevice = device;  // Update existing
-                                        deviceExists = true;
-                                        break;
-                                    }
+                    if (httpCode == HTTP_CODE_OK) {
+                        String xmlResponse = _http.getString();
+                        SonosDevice device;
+
+                        if (parseDeviceDescription(xmlResponse, device)) {
+                            device.ip = deviceIP;
+
+                            // Check if device already exists in new list
+                            bool deviceExists = false;
+                            for (auto& existingDevice : _newDevices) {
+                                if (existingDevice.ip == device.ip) {
+                                    existingDevice = device;  // Update existing
+                                    deviceExists = true;
+                                    break;
                                 }
+                            }
 
-                                if (!deviceExists) {
-                                    newDevices.push_back(device);
-                                    discoveredCount++;
-                                    logMessage("Discovered device: " + device.name + " at " + device.ip);
+                            if (!deviceExists) {
+                                _newDevices.push_back(device);
+                                logMessage("Discovered device: " + device.name + " at " + device.ip);
 
-                                    // Call callback if registered
-                                    if (_deviceFoundCallback) {
-                                        _deviceFoundCallback(device);
-                                    }
+                                // Call callback if registered
+                                if (_deviceFoundCallback) {
+                                    _deviceFoundCallback(device);
                                 }
                             }
                         }
-                        _http.end();
                     }
+                    _http.end();
                 }
             }
         }
-        delay(10);  // Small delay to prevent busy waiting
     }
-
-    // Replace the device list with newly discovered devices
-    _devices = newDevices;
-
-    logMessage("Discovery complete. Found " + String(_devices.size()) + " devices");
-    return SonosResult::SUCCESS;
 }
 
 bool Sonos::parseDeviceDescription(const String& xml, SonosDevice& device) {

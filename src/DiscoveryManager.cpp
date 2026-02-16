@@ -1,7 +1,24 @@
 #include "DiscoveryManager.h"
 
 DiscoveryManager::DiscoveryManager(Sonos& sonos, DeviceCache& cache) 
-    : _sonos(sonos), _cache(cache), _lastDiscoveryTime(0) {}
+    : _sonos(sonos), _cache(cache), _lastDiscoveryTime(0) {
+    _sonos.setDeviceFoundCallback([this](const SonosDevice& device) {
+        // Check if device already in our list
+        bool exists = false;
+        for (const auto& d : _devices) {
+            if (d.ip == device.ip) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            _devices.push_back(device);
+            if (_discoveryCallback) {
+                _discoveryCallback(_devices);
+            }
+        }
+    });
+}
 
 void DiscoveryManager::begin() {
     auto cached = _cache.loadDevices();
@@ -14,11 +31,23 @@ void DiscoveryManager::begin() {
         _devices.push_back(dev);
     }
     _sonos.setDevices(_devices);
+    _lastDiscoveryTime = millis(); // Don't scan immediately after boot
 }
 
 bool DiscoveryManager::update() {
+    if (_sonos.isDiscovering()) {
+        _sonos.updateDiscovery();
+        if (!_sonos.isDiscovering()) {
+            // Discovery just finished
+            if (_devices.size() > 0) {
+                _cache.saveDevices(_devices);
+            }
+        }
+        return true;
+    }
+
     unsigned long now = millis();
-    if (_lastDiscoveryTime == 0 || now - _lastDiscoveryTime > DISCOVERY_INTERVAL) {
+    if (_lastDiscoveryTime != 0 && now - _lastDiscoveryTime > DISCOVERY_INTERVAL) {
         forceRefresh();
         return true;
     }
@@ -26,13 +55,9 @@ bool DiscoveryManager::update() {
 }
 
 void DiscoveryManager::forceRefresh() {
-    if (WiFi.status() != WL_CONNECTED) return;
+    if (WiFi.status() != WL_CONNECTED || _sonos.isDiscovering()) return;
     
     _lastDiscoveryTime = millis();
-    if (_sonos.discoverDevices() == SonosResult::SUCCESS) {
-        _devices = _sonos.getDiscoveredDevices();
-        if (_devices.size() > 0) {
-            _cache.saveDevices(_devices);
-        }
-    }
+    _devices.clear();
+    _sonos.discoverDevices();
 }

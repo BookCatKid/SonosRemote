@@ -94,6 +94,8 @@ void checkWiFiConnection() {
 }
 
 void handleSpeakerListNavigation() {
+    if (sonos.isDiscovering()) return; // Lock UI during active scan to prevent confusion
+
     const auto& devices = discoveryManager.getDevices();
     int totalItems = devices.size() + 1; // +1 for Scan button
 
@@ -118,7 +120,7 @@ void handleSpeakerListNavigation() {
             // Select speaker
             selectedDeviceIP.fromString(devices[selectedIndex].ip.c_str());
             currentScreen = SCREEN_NOW_PLAYING;
-            
+
             // Reset state to force full redraw
             lastAlbumArtUrl = "";
             lastTitle = "";
@@ -236,6 +238,11 @@ void updateNowPlayingScreen() {
     tft.fillScreen(ST77XX_BLACK);
 
     discoveryManager.begin();
+    discoveryManager.setDiscoveryCallback([](const std::vector<SonosDevice>& devices) {
+        if (currentScreen == SCREEN_SPEAKER_LIST) {
+            speakerList.refreshDevices(devices);
+        }
+    });
     speakerList.setSelectedIndex(0);
     speakerList.draw(discoveryManager.getDevices());
 
@@ -249,7 +256,7 @@ void loop() {
     if (currentScreen == SCREEN_SPEAKER_LIST) {
         handleSpeakerListNavigation();
 
-        // Removed discoveryManager.update() to prevent automatic periodic scans
+        discoveryManager.update();
 
         if (wifiState != previousWifiState) {
             previousWifiState = wifiState;
