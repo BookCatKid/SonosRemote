@@ -39,6 +39,7 @@ std::vector<CachedDevice> DeviceCache::loadDevices() {
         CachedDevice dev;
         dev.name = obj["name"].as<String>();
         dev.ip = obj["ip"].as<String>();
+        dev.uuid = obj["uuid"].as<String>();
         devices.push_back(dev);
     }
     
@@ -57,6 +58,7 @@ bool DeviceCache::saveDevices(const std::vector<SonosDevice>& devices) {
         JsonObject obj = array.add<JsonObject>();
         obj["name"] = device.name;
         obj["ip"] = device.ip;
+        obj["uuid"] = device.uuid;
     }
     
     File file = LittleFS.open(CACHE_FILE, "w");

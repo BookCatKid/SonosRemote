@@ -10,8 +10,10 @@ void DiscoveryManager::begin() {
         SonosDevice dev;
         dev.name = c.name;
         dev.ip = c.ip;
+        dev.uuid = c.uuid;
         _devices.push_back(dev);
     }
+    _sonos.setDevices(_devices);
 }
 
 bool DiscoveryManager::update() {

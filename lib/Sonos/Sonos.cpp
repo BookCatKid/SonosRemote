@@ -204,7 +204,8 @@ SonosResult Sonos::discoverDevices() {
 
 bool Sonos::parseDeviceDescription(const String& xml, SonosDevice& device) {
     device.name = extractXmlValue(xml, "roomName");
-
+    device.uuid = extractXmlValue(xml, "UDN"); // Usually RINCON_...
+    
     // Check if it's a valid speaker (has internal speakers)
     String speakerSize = extractXmlValue(xml, "internalSpeakerSize");
     if (speakerSize.length() > 0) {
@@ -213,21 +214,21 @@ bool Sonos::parseDeviceDescription(const String& xml, SonosDevice& device) {
             return false;  // Not a speaker device
         }
     }
-
+    
     return device.name.length() > 0;
 }
 
 String Sonos::extractXmlValue(const String& xml, const String& tag) {
     String startTag = "<" + tag + ">";
     String endTag = "</" + tag + ">";
-
+    
     int startPos = xml.indexOf(startTag);
     if (startPos == -1) return "";
-
+    
     startPos += startTag.length();
     int endPos = xml.indexOf(endTag, startPos);
     if (endPos == -1) return "";
-
+    
     return xml.substring(startPos, endPos);
 }
 
@@ -370,21 +371,30 @@ SonosResult Sonos::previous(const String& deviceIP) {
 }
 
 // SOAP request implementation
-SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service,
+SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service, 
                                   const String& action, const String& body, String& response) {
     if (!isValidIP(deviceIP)) {
         return SonosResult::ERROR_INVALID_PARAM;
     }
-
+    
     // Format the complete SOAP request
     String soapBody = formatSoapRequest(service, action, body);
     String url = "http://" + deviceIP + ":1400/MediaRenderer/" + service + "/Control";
+    
+    if (_config.enableVerboseLogging) {
+        Serial.println("--- SOAP REQUEST ---");
+        Serial.print("URL: "); Serial.println(url);
+        Serial.print("Action: "); Serial.println(action);
+        Serial.println("Body:");
+        Serial.println(soapBody);
+        Serial.println("--------------------");
+    }
 
     // Set up HTTP request
     _http.begin(url);
     _http.addHeader("Content-Type", "text/xml; charset=utf-8");
     _http.addHeader("SOAPAction", "\"urn:schemas-upnp-org:service:" + service + ":1#" + action + "\"");
-
+    
     // Send request with retries
     int httpCode = -1;
     for (int retry = 0; retry < _config.maxRetries && httpCode != HTTP_CODE_OK; retry++) {
@@ -393,13 +403,27 @@ SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service
             delay(100 * (retry + 1));  // Exponential backoff
         }
     }
-
+    
     if (httpCode == HTTP_CODE_OK) {
         response = _http.getString();
+        
+        if (_config.enableVerboseLogging) {
+            Serial.println("--- SOAP RESPONSE ---");
+            Serial.println(response);
+            Serial.println("---------------------");
+        }
+
         _http.end();
         return SonosResult::SUCCESS;
     } else if (httpCode == HTTP_CODE_INTERNAL_SERVER_ERROR) {
         response = _http.getString();
+        
+        if (_config.enableVerboseLogging) {
+            Serial.println("--- SOAP ERROR RESPONSE ---");
+            Serial.println(response);
+            Serial.println("---------------------------");
+        }
+
         _http.end();
         return SonosResult::ERROR_SOAP_FAULT;
     } else {
@@ -408,7 +432,6 @@ SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service
         return SonosResult::ERROR_NETWORK;
     }
 }
-
 String Sonos::formatSoapRequest(const String& service, const String& action, const String& body) {
     char envelope[2048];
     snprintf(envelope, sizeof(envelope), SOAP_ENVELOPE_TEMPLATE, body.c_str());
@@ -475,24 +498,59 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
                                         GET_POSITION_INFO_TEMPLATE, response);
 
     if (result == SonosResult::SUCCESS) {
+        // Check for Group Coordinator redirection
+        String trackUri = extractXmlValue(response, "TrackURI");
+        if (trackUri.startsWith("x-rincon:")) {
+            String masterUuid = trackUri.substring(9); // e.g. RINCON_B8E93757B75C01400
+            logMessage("Device is a group member. Redirecting to coordinator: " + masterUuid);
+            
+            bool found = false;
+            for (const auto& dev : _devices) {
+                // Sonos UDNs are usually "uuid:RINCON_..." or just "RINCON_..."
+                if (dev.uuid.indexOf(masterUuid) != -1) {
+                    logMessage("Found coordinator " + dev.name + " at " + dev.ip);
+                    // Fetch metadata from the coordinator instead
+                    return getTrackInfo(dev.ip, title, artist, album, albumArtUrl, duration);
+                }
+            }
+            logMessage("Coordinator " + masterUuid + " not found in device list. Current metadata may be empty.");
+        }
+
         String metadata = extractXmlValue(response, "TrackMetaData");
 
         // Metadata is escaped XML inside the SOAP response.
         // We unescape it once here so we can use standard extractXmlValue on it.
-        metadata.replace("&amp;", "&");
-        metadata.replace("&lt;", "<");
-        metadata.replace("&gt;", ">");
-        metadata.replace("&quot;", "\"");
-        metadata.replace("&apos;", "'");
+        if (metadata.length() > 0 && metadata != "NOT_IMPLEMENTED") {
+            metadata.replace("&amp;", "&");
+            metadata.replace("&lt;", "<");
+            metadata.replace("&gt;", ">");
+            metadata.replace("&quot;", "\"");
+            metadata.replace("&apos;", "'");
 
-        if (metadata.length() > 0) {
-            title = extractXmlValue(metadata, "dc:title");
-            artist = extractXmlValue(metadata, "dc:creator");
-            album = extractXmlValue(metadata, "upnp:album");
-            albumArtUrl = extractXmlValue(metadata, "upnp:albumArtURI");
-            albumArtUrl.replace("&amp;", "&");
-            if (albumArtUrl.length() > 0 && albumArtUrl.startsWith("/")) {
-                albumArtUrl = "http://" + deviceIP + ":1400" + albumArtUrl;
+            if (metadata.length() > 0) {
+                            title = extractXmlValue(metadata, "dc:title");
+                            artist = extractXmlValue(metadata, "dc:creator");
+                            album = extractXmlValue(metadata, "upnp:album");
+                            albumArtUrl = extractXmlValue(metadata, "upnp:albumArtURI");
+                
+                            // Some streams (like Radio Paradise) put info in streamContent
+                            if (title.length() == 0) {
+                                String streamContent = extractXmlValue(metadata, "r:streamContent");
+                                if (streamContent.length() > 0) {
+                                    // streamContent is often "Artist - Title"
+                                    int dashPos = streamContent.indexOf(" - ");
+                                    if (dashPos != -1) {
+                                        artist = streamContent.substring(0, dashPos);
+                                        title = streamContent.substring(dashPos + 3);
+                                    } else {
+                                        title = streamContent;
+                                    }
+                                }
+                            }
+                
+                            albumArtUrl.replace("&amp;", "&");                if (albumArtUrl.length() > 0 && albumArtUrl.startsWith("/")) {
+                    albumArtUrl = "http://" + deviceIP + ":1400" + albumArtUrl;
+                }
             }
         }
 

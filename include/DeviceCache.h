@@ -8,10 +8,11 @@
 struct CachedDevice {
     String name;
     String ip;
+    String uuid;
     
     CachedDevice() = default;
-    CachedDevice(const String& n, const String& i) : name(n), ip(i) {}
-    CachedDevice(const SonosDevice& dev) : name(dev.name), ip(dev.ip) {}
+    CachedDevice(const String& n, const String& i, const String& u) : name(n), ip(i), uuid(u) {}
+    CachedDevice(const SonosDevice& dev) : name(dev.name), ip(dev.ip), uuid(dev.uuid) {}
 };
 
 class DeviceCache {

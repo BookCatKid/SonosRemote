@@ -23,6 +23,7 @@ enum class SonosResult {
 struct SonosDevice {
     String name;
     String ip;
+    String uuid;
 };
 
 // Configuration for the Sonos library
@@ -32,6 +33,7 @@ struct SonosConfig {
     uint8_t maxRetries = 3;
     uint16_t discoveryPort = 1901;
     bool enableLogging = false;
+    bool enableVerboseLogging = false;
 };
 
 class Sonos {
@@ -84,6 +86,7 @@ public:
     // Device discovery
     SonosResult discoverDevices();
     std::vector<SonosDevice> getDiscoveredDevices() const;
+    void setDevices(const std::vector<SonosDevice>& devices) { _devices = devices; }
     SonosDevice* getDeviceByName(const String& name);
     SonosDevice* getDeviceByIP(const String& ip);
     int getDeviceCount() const { return _devices.size(); }

@@ -149,32 +149,56 @@ void handleNowPlayingNavigation() {
 }
 
 String lastAlbumArtUrl = "";
+String lastTitle = "";
+String lastArtist = "";
+String lastPlaybackState = "";
+int lastProgressPercent = -1;
+int lastVolume = -1;
 
 void updateNowPlayingScreen() {
     if (wifiState != WIFI_CONNECTED) return;
 
     if (sonosController.update(selectedDeviceIP.toString())) {
         const auto& data = sonosController.getTrackData();
-        nowPlaying.drawTrackInfo(data.title.c_str(), data.artist.c_str());
         
+        // 1. Update Album Art if changed
         if (data.albumArtUrl != lastAlbumArtUrl) {
             lastAlbumArtUrl = data.albumArtUrl;
             nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
         }
 
+        // 2. Update Track Info if title or artist changed
+        if (data.title != lastTitle || data.artist != lastArtist) {
+            lastTitle = data.title;
+            lastArtist = data.artist;
+            nowPlaying.drawTrackInfo(data.title.c_str(), data.artist.c_str(), data.album.c_str());
+        }
+
+        // 3. Update Progress Bar if changed
         int progressPercent = 0;
         if (data.duration > 0) {
             progressPercent = (data.position * 100) / data.duration;
         }
-        nowPlaying.drawProgressBar(progressPercent);
-        nowPlaying.drawVolume(data.volume);
-        nowPlaying.drawStatusBar(data.playbackState.c_str());
+        if (progressPercent != lastProgressPercent) {
+            lastProgressPercent = progressPercent;
+            nowPlaying.drawProgressBar(progressPercent);
+        }
+
+        // 4. Update Volume if changed
+        if (data.volume != lastVolume) {
+            lastVolume = data.volume;
+            nowPlaying.drawVolume(data.volume);
+        }
+
+        // 5. Update Status Bar if playback state changed
+        if (data.playbackState != lastPlaybackState) {
+            lastPlaybackState = data.playbackState;
+            nowPlaying.drawStatusBar(data.playbackState.c_str());
+        }
     } else {
         nowPlaying.drawStatusBar("Offline");
     }
-}
-
-void setup() {
+}void setup() {
     Serial.begin(115200);
     Serial.println("Sonos Remote Starting...");
 
@@ -183,6 +207,7 @@ void setup() {
     // Enable logging for the Sonos library
     SonosConfig config;
     config.enableLogging = true;
+    config.enableVerboseLogging = true;
     sonos.setConfig(config);
 
     pinMode(TFT_BL, OUTPUT);
@@ -206,9 +231,9 @@ void loop() {
 
     if (currentScreen == SCREEN_SPEAKER_LIST) {
         handleSpeakerListNavigation();
-        
+
         // Removed discoveryManager.update() to prevent automatic periodic scans
-        
+
         if (wifiState != previousWifiState) {
             previousWifiState = wifiState;
             if (wifiState == WIFI_CONNECTING) {
@@ -221,7 +246,7 @@ void loop() {
         }
     } else if (currentScreen == SCREEN_NOW_PLAYING) {
         handleNowPlayingNavigation();
-        
+
         unsigned long currentTime = millis();
         if (currentTime - lastRefreshTime >= REFRESH_INTERVAL) {
             lastRefreshTime = currentTime;

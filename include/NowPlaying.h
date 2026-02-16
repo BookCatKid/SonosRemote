@@ -8,7 +8,7 @@ public:
     void drawStatusBar(const char* statusText);
     void drawAlbumArt();
     void drawAlbumArt(const char* url);
-    void drawTrackInfo(const char* song, const char* artist);
+    void drawTrackInfo(const char* song, const char* artist, const char* album);
     void drawProgressBar(int progress);
     void drawVolume(int volume);
     void drawSpeakerInfo(const char* name);
