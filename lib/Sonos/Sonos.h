@@ -8,7 +8,6 @@
 #include <vector>
 #include <functional>
 
-// Error codes for Sonos operations
 enum class SonosResult {
     SUCCESS = 0,
     ERROR_NETWORK = -1,
@@ -19,14 +18,12 @@ enum class SonosResult {
     ERROR_INVALID_PARAM = -6
 };
 
-// Structure to hold discovered Sonos device information
 struct SonosDevice {
     String name;
     String ip;
     String uuid;
 };
 
-// Configuration for the Sonos library
 struct SonosConfig {
     uint16_t discoveryTimeoutMs = 10000;
     uint16_t soapTimeoutMs = 10000;
@@ -38,7 +35,6 @@ struct SonosConfig {
 
 class Sonos {
 private:
-    // Private members
     WiFiUDP _udp;
     HTTPClient _http;
     std::vector<SonosDevice> _devices;
@@ -48,7 +44,7 @@ private:
     unsigned long _discoveryStartTime = 0;
     std::vector<SonosDevice> _newDevices;
     
-    // Network constants
+    // SSDP/UPnP constants
     static const char* SSDP_MULTICAST_IP;
     static const int SSDP_PORT = 1900;
     static const char* SONOS_DEVICE_TYPE;
@@ -67,7 +63,6 @@ private:
     static const char* GET_POSITION_INFO_TEMPLATE;
     static const char* GET_TRANSPORT_INFO_TEMPLATE;
     
-    // Private methods
     bool parseDeviceDescription(const String& xml, SonosDevice& device);
     String extractXmlValue(const String& xml, const String& tag);
     SonosResult sendSoapRequest(const String& deviceIP, const String& service, 
@@ -77,16 +72,14 @@ private:
     void logMessage(const String& message);
     
 public:
-    // Constructor
     Sonos();
     Sonos(const SonosConfig& config);
     
-    // Initialization
     SonosResult begin();
     void end();
     bool isInitialized() const { return _initialized; }
     
-    // Device discovery
+    // Discovery
     SonosResult discoverDevices();
     void updateDiscovery();
     bool isDiscovering() const { return _isDiscovering; }
@@ -96,31 +89,29 @@ public:
     SonosDevice* getDeviceByIP(const String& ip);
     int getDeviceCount() const { return _devices.size(); }
     
-    // Volume control
+    // Control
     SonosResult setVolume(const String& deviceIP, int volume);
     SonosResult getVolume(const String& deviceIP, int& volume);
     SonosResult increaseVolume(const String& deviceIP, int increment = 5);
     SonosResult decreaseVolume(const String& deviceIP, int decrement = 5);
     SonosResult setMute(const String& deviceIP, bool mute);
     
-    // Playback control
     SonosResult play(const String& deviceIP);
     SonosResult pause(const String& deviceIP);
     SonosResult stop(const String& deviceIP);
     SonosResult next(const String& deviceIP);
     SonosResult previous(const String& deviceIP);
     
-    // Track information
+    // Info
     SonosResult getTrackInfo(const String& deviceIP, String& title, String& artist, String& album, String& albumArtUrl, int& duration);
     SonosResult getPlaybackState(const String& deviceIP, String& state);
     SonosResult getPositionInfo(const String& deviceIP, int& position, int& duration);
     
-    // Utility methods
     void setConfig(const SonosConfig& config) { _config = config; }
     SonosConfig getConfig() const { return _config; }
     String getErrorString(SonosResult result);
     
-    // Event callbacks
+    // Callbacks
     typedef std::function<void(const SonosDevice&)> DeviceFoundCallback;
     typedef std::function<void(const String&)> LogCallback;
     
@@ -132,4 +123,4 @@ private:
     LogCallback _logCallback = nullptr;
 };
 
-#endif // SONOS_H
+#endif

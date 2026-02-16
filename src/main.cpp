@@ -16,9 +16,9 @@
 #define TFT_CS  D3
 #define TFT_DC  D2
 #define TFT_RST D1
-#define TFT_BL  D6 // Backlight moved to D6
+#define TFT_BL  D6
 
-// Button pins on MCP23017
+// MCP23017 pins
 #define BTN_UP    13
 #define BTN_DOWN  14
 #define BTN_CLICK 15
@@ -31,15 +31,12 @@ SpeakerList speakerList;
 DeviceCache deviceCache;
 SonosController sonosController(sonos);
 DiscoveryManager discoveryManager(sonos, deviceCache);
-
-// Button handler
 ButtonHandler buttons(mcp, BTN_UP, BTN_DOWN, BTN_CLICK);
 
-// Navigation state (only for speaker list)
 int selectedIndex = 0;
 IPAddress selectedDeviceIP;
 
-// UI State tracking to prevent flickering
+// UI tracking
 String lastAlbumArtUrl = "";
 String lastTitle = "";
 String lastArtist = "";
@@ -94,54 +91,42 @@ void checkWiFiConnection() {
 }
 
 void handleSpeakerListNavigation() {
-    if (sonos.isDiscovering()) return; // Lock UI during active scan to prevent confusion
+    if (sonos.isDiscovering()) return;
 
     const auto& devices = discoveryManager.getDevices();
     int totalItems = devices.size() + 1; // +1 for Scan button
 
     bool selectionChanged = false;
 
-    if (buttons.upPressed()) {
-        if (selectedIndex > 0) {
-            selectedIndex--;
-            selectionChanged = true;
-        }
+    if (buttons.upPressed() && selectedIndex > 0) {
+        selectedIndex--;
+        selectionChanged = true;
     }
 
-    if (buttons.downPressed()) {
-        if (selectedIndex < totalItems - 1) {
-            selectedIndex++;
-            selectionChanged = true;
-        }
+    if (buttons.downPressed() && selectedIndex < totalItems - 1) {
+        selectedIndex++;
+        selectionChanged = true;
     }
 
     if (buttons.clickPressed()) {
         if (selectedIndex < (int)devices.size()) {
-            // Select speaker
             selectedDeviceIP.fromString(devices[selectedIndex].ip.c_str());
             currentScreen = SCREEN_NOW_PLAYING;
 
-            // Reset state to force full redraw
-            lastAlbumArtUrl = "";
-            lastTitle = "";
-            lastArtist = "";
-            lastPlaybackState = "";
-            lastProgressPercent = -1;
-            lastVolume = -1;
+            // Full redraw reset
+            lastAlbumArtUrl = lastTitle = lastArtist = lastPlaybackState = "";
+            lastProgressPercent = lastVolume = -1;
 
             nowPlaying.drawStatic();
             nowPlaying.drawSpeakerInfo(devices[selectedIndex].name.c_str());
-            lastRefreshTime = 0; // Force immediate update
+            lastRefreshTime = 0;
+        } else if (wifiState == WIFI_CONNECTED) {
+            speakerList.updateHeader("Scanning...");
+            discoveryManager.forceRefresh();
+            speakerList.updateHeader("Connected");
+            speakerList.refreshDevices(discoveryManager.getDevices());
         } else {
-            // Scan button pressed
-            if (wifiState == WIFI_CONNECTED) {
-                speakerList.updateHeader("Scanning...");
-                discoveryManager.forceRefresh();
-                speakerList.updateHeader("Connected");
-                speakerList.refreshDevices(discoveryManager.getDevices());
-            } else {
-                speakerList.updateHeader("WiFi Required");
-            }
+            speakerList.updateHeader("WiFi Required");
         }
         return;
     }
@@ -151,14 +136,12 @@ void handleSpeakerListNavigation() {
         speakerList.refreshDevices(devices);
     }
 }
-
 void handleNowPlayingNavigation() {
     if (buttons.clickPressed()) {
         currentScreen = SCREEN_SPEAKER_LIST;
         speakerList.draw(discoveryManager.getDevices());
         return;
     }
-
     if (buttons.upPressed()) {
         sonosController.next(selectedDeviceIP.toString());
         lastRefreshTime = 0;
@@ -175,36 +158,25 @@ void updateNowPlayingScreen() {
     if (sonosController.update(selectedDeviceIP.toString())) {
         const auto& data = sonosController.getTrackData();
 
-        // 1. Update Album Art if changed
         if (data.albumArtUrl != lastAlbumArtUrl) {
             lastAlbumArtUrl = data.albumArtUrl;
             nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
         }
-
-        // 2. Update Track Info if title or artist changed
         if (data.title != lastTitle || data.artist != lastArtist) {
             lastTitle = data.title;
             lastArtist = data.artist;
             nowPlaying.drawTrackInfo(data.title.c_str(), data.artist.c_str(), data.album.c_str());
         }
 
-        // 3. Update Progress Bar if changed
-        int progressPercent = 0;
-        if (data.duration > 0) {
-            progressPercent = (data.position * 100) / data.duration;
-        }
+        int progressPercent = (data.duration > 0) ? (data.position * 100) / data.duration : 0;
         if (progressPercent != lastProgressPercent) {
             lastProgressPercent = progressPercent;
             nowPlaying.drawProgressBar(data.position, data.duration);
         }
-
-        // 4. Update Volume if changed
         if (data.volume != lastVolume) {
             lastVolume = data.volume;
             nowPlaying.drawVolume(data.volume);
         }
-
-        // 5. Update Status Bar if playback state changed
         if (data.playbackState != lastPlaybackState) {
             lastPlaybackState = data.playbackState;
             nowPlaying.drawStatusBar(data.playbackState.c_str());
@@ -215,15 +187,10 @@ void updateNowPlayingScreen() {
 }void setup() {
     Serial.begin(115200);
     Serial.println("Sonos Remote Starting...");
-
     deviceCache.begin();
 
-    // Initialize I2C and MCP23017
-    if (!mcp.begin_I2C(0x20)) {
-        Serial.println("Error: MCP23017 not found!");
-    }
+    if (!mcp.begin_I2C(0x20)) Serial.println("Error: MCP23017 not found!");
 
-    // Enable logging for the Sonos library
     SonosConfig config;
     config.enableLogging = true;
     config.enableVerboseLogging = true;
@@ -239,9 +206,7 @@ void updateNowPlayingScreen() {
 
     discoveryManager.begin();
     discoveryManager.setDiscoveryCallback([](const std::vector<SonosDevice>& devices) {
-        if (currentScreen == SCREEN_SPEAKER_LIST) {
-            speakerList.refreshDevices(devices);
-        }
+        if (currentScreen == SCREEN_SPEAKER_LIST) speakerList.refreshDevices(devices);
     });
     speakerList.setSelectedIndex(0);
     speakerList.draw(discoveryManager.getDevices());
@@ -255,25 +220,20 @@ void loop() {
 
     if (currentScreen == SCREEN_SPEAKER_LIST) {
         handleSpeakerListNavigation();
-
         discoveryManager.update();
 
         if (wifiState != previousWifiState) {
             previousWifiState = wifiState;
-            if (wifiState == WIFI_CONNECTING) {
-                speakerList.updateHeader("WiFi: Connecting...");
-            } else if (wifiState == WIFI_CONNECTED) {
-                speakerList.updateHeader("WiFi: Connected");
-            } else if (wifiState == WIFI_DISCONNECTED) {
-                speakerList.updateHeader("WiFi: Failed");
-            }
+            if (wifiState == WIFI_CONNECTING) speakerList.updateHeader("WiFi: Connecting...");
+            else if (wifiState == WIFI_CONNECTED) speakerList.updateHeader("WiFi: Connected");
+            else if (wifiState == WIFI_DISCONNECTED) speakerList.updateHeader("WiFi: Failed");
         }
     } else if (currentScreen == SCREEN_NOW_PLAYING) {
         handleNowPlayingNavigation();
 
-        unsigned long currentTime = millis();
-        if (currentTime - lastRefreshTime >= REFRESH_INTERVAL) {
-            lastRefreshTime = currentTime;
+        unsigned long currentMillis = millis();
+        if (currentMillis - lastRefreshTime >= REFRESH_INTERVAL) {
+            lastRefreshTime = currentMillis;
             updateNowPlayingScreen();
         }
     }

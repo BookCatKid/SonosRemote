@@ -61,37 +61,24 @@ const char* Sonos::GET_TRANSPORT_INFO_TEMPLATE =
     "<u:GetTransportInfo xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
     "<InstanceID>0</InstanceID></u:GetTransportInfo>";
 
-// Constructor
-Sonos::Sonos() {
-    // Use default configuration
-}
+Sonos::Sonos() {}
+Sonos::Sonos(const SonosConfig& config) : _config(config) {}
 
-Sonos::Sonos(const SonosConfig& config) : _config(config) {
-    // Use provided configuration
-}
-
-// Initialization
 SonosResult Sonos::begin() {
-    if (_initialized) {
-        return SonosResult::SUCCESS;
-    }
+    if (_initialized) return SonosResult::SUCCESS;
 
-    // Check WiFi connection
     if (WiFi.status() != WL_CONNECTED) {
         logMessage("WiFi not connected");
         return SonosResult::ERROR_NETWORK;
     }
 
-    // Initialize UDP for SSDP discovery
     if (!_udp.begin(_config.discoveryPort)) {
         logMessage("Failed to initialize UDP");
         return SonosResult::ERROR_NETWORK;
     }
 
-    // Configure HTTP client
     _http.setTimeout(_config.soapTimeoutMs);
     _http.setReuse(true);
-
     _initialized = true;
     logMessage("Sonos library initialized successfully");
     return SonosResult::SUCCESS;
@@ -99,7 +86,6 @@ SonosResult Sonos::begin() {
 
 void Sonos::end() {
     if (!_initialized) return;
-
     _udp.stop();
     _http.end();
     _devices.clear();
@@ -131,7 +117,7 @@ SonosResult Sonos::discoverDevices() {
     _isDiscovering = true;
     _discoveryStartTime = millis();
     _newDevices.clear();
-    
+
     return SonosResult::SUCCESS;
 }
 
@@ -149,21 +135,17 @@ void Sonos::updateDiscovery() {
     if (packetSize > 0) {
         String response = _udp.readString();
 
-        // Parse SSDP response
         if (response.indexOf("ZonePlayer") != -1) {
-            // Extract location URL
             int locationStart = response.indexOf("LOCATION: ") + 10;
             int locationEnd = response.indexOf("\r\n", locationStart);
             if (locationStart > 9 && locationEnd > locationStart) {
                 String locationUrl = response.substring(locationStart, locationEnd);
 
-                // Extract IP from URL
                 int ipStart = locationUrl.indexOf("//") + 2;
                 int ipEnd = locationUrl.indexOf(":", ipStart);
                 String deviceIP = locationUrl.substring(ipStart, ipEnd);
 
                 if (isValidIP(deviceIP)) {
-                    // Fetch device description
                     _http.begin(locationUrl);
                     int httpCode = _http.GET();
 
@@ -174,11 +156,10 @@ void Sonos::updateDiscovery() {
                         if (parseDeviceDescription(xmlResponse, device)) {
                             device.ip = deviceIP;
 
-                            // Check if device already exists in new list
                             bool deviceExists = false;
                             for (auto& existingDevice : _newDevices) {
                                 if (existingDevice.ip == device.ip) {
-                                    existingDevice = device;  // Update existing
+                                    existingDevice = device;
                                     deviceExists = true;
                                     break;
                                 }
@@ -187,11 +168,7 @@ void Sonos::updateDiscovery() {
                             if (!deviceExists) {
                                 _newDevices.push_back(device);
                                 logMessage("Discovered device: " + device.name + " at " + device.ip);
-
-                                // Call callback if registered
-                                if (_deviceFoundCallback) {
-                                    _deviceFoundCallback(device);
-                                }
+                                if (_deviceFoundCallback) _deviceFoundCallback(device);
                             }
                         }
                     }
@@ -204,31 +181,27 @@ void Sonos::updateDiscovery() {
 
 bool Sonos::parseDeviceDescription(const String& xml, SonosDevice& device) {
     device.name = extractXmlValue(xml, "roomName");
-    device.uuid = extractXmlValue(xml, "UDN"); // Usually RINCON_...
-    
-    // Check if it's a valid speaker (has internal speakers)
+    device.uuid = extractXmlValue(xml, "UDN");
+
     String speakerSize = extractXmlValue(xml, "internalSpeakerSize");
     if (speakerSize.length() > 0) {
-        int size = speakerSize.toInt();
-        if (size < 0) {
-            return false;  // Not a speaker device
-        }
+        if (speakerSize.toInt() < 0) return false;
     }
-    
+
     return device.name.length() > 0;
 }
 
 String Sonos::extractXmlValue(const String& xml, const String& tag) {
     String startTag = "<" + tag + ">";
     String endTag = "</" + tag + ">";
-    
+
     int startPos = xml.indexOf(startTag);
     if (startPos == -1) return "";
-    
+
     startPos += startTag.length();
     int endPos = xml.indexOf(endTag, startPos);
     if (endPos == -1) return "";
-    
+
     return xml.substring(startPos, endPos);
 }
 
@@ -288,7 +261,6 @@ SonosResult Sonos::decreaseVolume(const String& deviceIP, int decrement) {
     return setVolume(deviceIP, newVolume);
 }
 
-// Mute control
 SonosResult Sonos::setMute(const String& deviceIP, bool mute) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
 
@@ -299,88 +271,53 @@ SonosResult Sonos::setMute(const String& deviceIP, bool mute) {
     return sendSoapRequest(deviceIP, "RenderingControl", "SetMute", body, response);
 }
 
-// Playback control implementation
 SonosResult Sonos::play(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
-
     String response;
-    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Play",
-                                        TRANSPORT_PLAY_TEMPLATE, response);
-
-    if (result == SonosResult::SUCCESS) {
-        logMessage("Play command sent to " + deviceIP);
-    }
-
+    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Play", TRANSPORT_PLAY_TEMPLATE, response);
+    if (result == SonosResult::SUCCESS) logMessage("Play command sent to " + deviceIP);
     return result;
 }
 
 SonosResult Sonos::pause(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
-
     String response;
-    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Pause",
-                                        TRANSPORT_PAUSE_TEMPLATE, response);
-
-    if (result == SonosResult::SUCCESS) {
-        logMessage("Pause command sent to " + deviceIP);
-    }
-
+    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Pause", TRANSPORT_PAUSE_TEMPLATE, response);
+    if (result == SonosResult::SUCCESS) logMessage("Pause command sent to " + deviceIP);
     return result;
 }
 
 SonosResult Sonos::stop(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
-
     String response;
-    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Stop",
-                                        TRANSPORT_STOP_TEMPLATE, response);
-
-    if (result == SonosResult::SUCCESS) {
-        logMessage("Stop command sent to " + deviceIP);
-    }
-
+    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Stop", TRANSPORT_STOP_TEMPLATE, response);
+    if (result == SonosResult::SUCCESS) logMessage("Stop command sent to " + deviceIP);
     return result;
 }
 
 SonosResult Sonos::next(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
-
     String response;
-    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Next",
-                                        TRANSPORT_NEXT_TEMPLATE, response);
-
-    if (result == SonosResult::SUCCESS) {
-        logMessage("Next command sent to " + deviceIP);
-    }
-
+    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Next", TRANSPORT_NEXT_TEMPLATE, response);
+    if (result == SonosResult::SUCCESS) logMessage("Next command sent to " + deviceIP);
     return result;
 }
 
 SonosResult Sonos::previous(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
-
     String response;
-    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Previous",
-                                        TRANSPORT_PREVIOUS_TEMPLATE, response);
-
-    if (result == SonosResult::SUCCESS) {
-        logMessage("Previous command sent to " + deviceIP);
-    }
-
+    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Previous", TRANSPORT_PREVIOUS_TEMPLATE, response);
+    if (result == SonosResult::SUCCESS) logMessage("Previous command sent to " + deviceIP);
     return result;
 }
 
-// SOAP request implementation
-SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service, 
+SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service,
                                   const String& action, const String& body, String& response) {
-    if (!isValidIP(deviceIP)) {
-        return SonosResult::ERROR_INVALID_PARAM;
-    }
-    
-    // Format the complete SOAP request
+    if (!isValidIP(deviceIP)) return SonosResult::ERROR_INVALID_PARAM;
+
     String soapBody = formatSoapRequest(service, action, body);
     String url = "http://" + deviceIP + ":1400/MediaRenderer/" + service + "/Control";
-    
+
     if (_config.enableVerboseLogging) {
         Serial.println("--- SOAP REQUEST ---");
         Serial.print("URL: "); Serial.println(url);
@@ -390,40 +327,32 @@ SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service
         Serial.println("--------------------");
     }
 
-    // Set up HTTP request
     _http.begin(url);
     _http.addHeader("Content-Type", "text/xml; charset=utf-8");
     _http.addHeader("SOAPAction", "\"urn:schemas-upnp-org:service:" + service + ":1#" + action + "\"");
-    
-    // Send request with retries
+
     int httpCode = -1;
     for (int retry = 0; retry < _config.maxRetries && httpCode != HTTP_CODE_OK; retry++) {
         httpCode = _http.POST(soapBody);
-        if (httpCode != HTTP_CODE_OK) {
-            delay(100 * (retry + 1));  // Exponential backoff
-        }
+        if (httpCode != HTTP_CODE_OK) delay(100 * (retry + 1));
     }
-    
+
     if (httpCode == HTTP_CODE_OK) {
         response = _http.getString();
-        
         if (_config.enableVerboseLogging) {
             Serial.println("--- SOAP RESPONSE ---");
             Serial.println(response);
             Serial.println("---------------------");
         }
-
         _http.end();
         return SonosResult::SUCCESS;
     } else if (httpCode == HTTP_CODE_INTERNAL_SERVER_ERROR) {
         response = _http.getString();
-        
         if (_config.enableVerboseLogging) {
             Serial.println("--- SOAP ERROR RESPONSE ---");
             Serial.println(response);
             Serial.println("---------------------------");
         }
-
         _http.end();
         return SonosResult::ERROR_SOAP_FAULT;
     } else {
@@ -432,13 +361,13 @@ SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service
         return SonosResult::ERROR_NETWORK;
     }
 }
+
 String Sonos::formatSoapRequest(const String& service, const String& action, const String& body) {
     char envelope[2048];
     snprintf(envelope, sizeof(envelope), SOAP_ENVELOPE_TEMPLATE, body.c_str());
     return String(envelope);
 }
 
-// Utility methods
 bool Sonos::isValidIP(const String& ip) {
     IPAddress addr;
     return addr.fromString(ip);
@@ -446,11 +375,8 @@ bool Sonos::isValidIP(const String& ip) {
 
 void Sonos::logMessage(const String& message) {
     if (_config.enableLogging) {
-        if (_logCallback) {
-            _logCallback(message);
-        } else {
-            Serial.println("[Sonos] " + message);
-        }
+        if (_logCallback) _logCallback(message);
+        else Serial.println("[Sonos] " + message);
     }
 }
 
@@ -489,7 +415,6 @@ String Sonos::getErrorString(SonosResult result) {
     }
 }
 
-// Track information
 SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& artist, String& album, String& albumArtUrl, int& duration) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
 
@@ -498,28 +423,26 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
                                         GET_POSITION_INFO_TEMPLATE, response);
 
     if (result == SonosResult::SUCCESS) {
-        // Check for Group Coordinator redirection
         String trackUri = extractXmlValue(response, "TrackURI");
         if (trackUri.startsWith("x-rincon:")) {
-            String masterUuid = trackUri.substring(9); // e.g. RINCON_B8E93757B75C01400
-            logMessage("Device is a group member. Redirecting to coordinator: " + masterUuid);
-            
-            bool found = false;
+            String masterUuid = trackUri.substring(9);
+            logMessage("Redirecting to coordinator: " + masterUuid);
+
             for (const auto& dev : _devices) {
-                // Sonos UDNs are usually "uuid:RINCON_..." or just "RINCON_..."
                 if (dev.uuid.indexOf(masterUuid) != -1) {
-                    logMessage("Found coordinator " + dev.name + " at " + dev.ip);
-                    // Fetch metadata from the coordinator instead
                     return getTrackInfo(dev.ip, title, artist, album, albumArtUrl, duration);
                 }
             }
-            logMessage("Coordinator " + masterUuid + " not found in device list. Current metadata may be empty.");
+            logMessage("Coordinator not found for UUID: " + masterUuid);
+            title = "Unknown Title";
+            artist = "Unknown Artist";
+            album = "";
+            albumArtUrl = "";
+            duration = 0;
+            return SonosResult::ERROR_INVALID_DEVICE;
         }
 
         String metadata = extractXmlValue(response, "TrackMetaData");
-
-        // Metadata is escaped XML inside the SOAP response.
-        // We unescape it once here so we can use standard extractXmlValue on it.
         if (metadata.length() > 0 && metadata != "NOT_IMPLEMENTED") {
             metadata.replace("&amp;", "&");
             metadata.replace("&lt;", "<");
@@ -527,59 +450,49 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
             metadata.replace("&quot;", "\"");
             metadata.replace("&apos;", "'");
 
-            if (metadata.length() > 0) {
-                            title = extractXmlValue(metadata, "dc:title");
-                            artist = extractXmlValue(metadata, "dc:creator");
-                            album = extractXmlValue(metadata, "upnp:album");
-                            albumArtUrl = extractXmlValue(metadata, "upnp:albumArtURI");
-                
-                            // Some streams (like Radio Paradise) put info in streamContent
-                            if (title.length() == 0) {
-                                String streamContent = extractXmlValue(metadata, "r:streamContent");
-                                if (streamContent.length() > 0) {
-                                    // streamContent is often "Artist - Title"
-                                    int dashPos = streamContent.indexOf(" - ");
-                                    if (dashPos != -1) {
-                                        artist = streamContent.substring(0, dashPos);
-                                        title = streamContent.substring(dashPos + 3);
-                                    } else {
-                                        title = streamContent;
-                                    }
-                                }
-                            }
-                
-                            albumArtUrl.replace("&amp;", "&");                if (albumArtUrl.length() > 0 && albumArtUrl.startsWith("/")) {
-                    albumArtUrl = "http://" + deviceIP + ":1400" + albumArtUrl;
+            title = extractXmlValue(metadata, "dc:title");
+            artist = extractXmlValue(metadata, "dc:creator");
+            album = extractXmlValue(metadata, "upnp:album");
+                    } else {
+                        title = streamContent;
+                    }
+
+            if (title.length() == 0) {
+                String streamContent = extractXmlValue(metadata, "r:streamContent");
+                if (streamContent.length() > 0) {
+                    int dashPos = streamContent.indexOf(" - ");
+                    if (dashPos != -1) {
+                        artist = streamContent.substring(0, dashPos);
+                        title = streamContent.substring(dashPos + 3);
+                    } else title = streamContent;
                 }
+            }
+
+            albumArtUrl.replace("&amp;", "&");
+            if (albumArtUrl.length() > 0 && albumArtUrl.startsWith("/")) {
+                albumArtUrl = "http://" + deviceIP + ":1400" + albumArtUrl;
             }
         }
 
         if (title.length() == 0) title = "Unknown Title";
         if (artist.length() == 0) artist = "Unknown Artist";
 
-        // Parse duration from "H:MM:SS" or "M:SS" format
         String durationStr = extractXmlValue(response, "TrackDuration");
         duration = 0;
         if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") {
             int firstColon = durationStr.indexOf(':');
             int lastColon = durationStr.lastIndexOf(':');
             if (firstColon != -1 && lastColon != -1 && firstColon != lastColon) {
-                // H:MM:SS format
-                int hours = durationStr.substring(0, firstColon).toInt();
-                int minutes = durationStr.substring(firstColon + 1, lastColon).toInt();
-                int seconds = durationStr.substring(lastColon + 1).toInt();
-                duration = hours * 3600 + minutes * 60 + seconds;
+                duration = durationStr.substring(0, firstColon).toInt() * 3600 +
+                           durationStr.substring(firstColon + 1, lastColon).toInt() * 60 +
+                           durationStr.substring(lastColon + 1).toInt();
             } else if (firstColon != -1) {
-                // M:SS format
-                int minutes = durationStr.substring(0, firstColon).toInt();
-                int seconds = durationStr.substring(firstColon + 1).toInt();
-                duration = minutes * 60 + seconds;
+                duration = durationStr.substring(0, firstColon).toInt() * 60 +
+                           durationStr.substring(firstColon + 1).toInt();
             }
         }
-
         logMessage("Track info: " + title + " by " + artist + " (Art: " + albumArtUrl + ")");
     }
-
     return result;
 }
 
@@ -606,42 +519,35 @@ SonosResult Sonos::getPositionInfo(const String& deviceIP, int& position, int& d
                                         GET_POSITION_INFO_TEMPLATE, response);
 
     if (result == SonosResult::SUCCESS) {
-        // Parse current position
         String relTime = extractXmlValue(response, "RelTime");
         position = 0;
         if (relTime.length() > 0 && relTime != "NOT_IMPLEMENTED") {
             int firstColon = relTime.indexOf(':');
             int lastColon = relTime.lastIndexOf(':');
             if (firstColon != -1 && lastColon != -1 && firstColon != lastColon) {
-                int hours = relTime.substring(0, firstColon).toInt();
-                int minutes = relTime.substring(firstColon + 1, lastColon).toInt();
-                int seconds = relTime.substring(lastColon + 1).toInt();
-                position = hours * 3600 + minutes * 60 + seconds;
+                position = relTime.substring(0, firstColon).toInt() * 3600 +
+                           relTime.substring(firstColon + 1, lastColon).toInt() * 60 +
+                           relTime.substring(lastColon + 1).toInt();
             } else if (firstColon != -1) {
-                int minutes = relTime.substring(0, firstColon).toInt();
-                int seconds = relTime.substring(firstColon + 1).toInt();
-                position = minutes * 60 + seconds;
+                position = relTime.substring(0, firstColon).toInt() * 60 +
+                           relTime.substring(firstColon + 1).toInt();
             }
         }
 
-        // Parse track duration
         String durationStr = extractXmlValue(response, "TrackDuration");
         duration = 0;
         if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") {
             int firstColon = durationStr.indexOf(':');
             int lastColon = durationStr.lastIndexOf(':');
             if (firstColon != -1 && lastColon != -1 && firstColon != lastColon) {
-                int hours = durationStr.substring(0, firstColon).toInt();
-                int minutes = durationStr.substring(firstColon + 1, lastColon).toInt();
-                int seconds = durationStr.substring(lastColon + 1).toInt();
-                duration = hours * 3600 + minutes * 60 + seconds;
+                duration = durationStr.substring(0, firstColon).toInt() * 3600 +
+                           durationStr.substring(firstColon + 1, lastColon).toInt() * 60 +
+                           durationStr.substring(lastColon + 1).toInt();
             } else if (firstColon != -1) {
-                int minutes = durationStr.substring(0, firstColon).toInt();
-                int seconds = durationStr.substring(firstColon + 1).toInt();
-                duration = minutes * 60 + seconds;
+                duration = durationStr.substring(0, firstColon).toInt() * 60 +
+                           durationStr.substring(firstColon + 1).toInt();
             }
         }
     }
-
     return result;
 }

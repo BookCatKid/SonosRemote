@@ -8,11 +8,8 @@
 #include "UIGlobals.h"
 
 extern Adafruit_ST7789 tft;
-
-extern const unsigned char image_song_cover_bits[];
 extern const unsigned char image_volume_normal_bits[];
 
-// Callback function to draw decoded JPEG blocks
 static bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
     if (y >= tft.height()) return false;
     tft.drawRGBBitmap(x, y, bitmap, w, h);
@@ -37,15 +34,14 @@ void NowPlaying::drawStatusBar(const char* statusText) {
 }
 
 void NowPlaying::drawAlbumArt() {
-    // Placeholder: A stylized vinyl record
     int centerX = 120;
     int centerY = 105;
     tft.fillRect(0, 58, 240, 94, ST77XX_BLACK);
-    tft.drawCircle(centerX, centerY, 40, 0x4208); // Outer ring (slightly smaller)
+    tft.drawCircle(centerX, centerY, 40, 0x4208);
     tft.drawCircle(centerX, centerY, 38, 0x4208);
-    tft.drawCircle(centerX, centerY, 12, 0xAD55); // Label
-    tft.fillCircle(centerX, centerY, 3, ST77XX_WHITE); // Center hole
-    
+    tft.drawCircle(centerX, centerY, 12, 0xAD55);
+    tft.fillCircle(centerX, centerY, 3, ST77XX_WHITE);
+
     tft.setTextColor(0x4208);
     tft.setCursor(centerX - 20, centerY + 45);
     tft.print("NO ART");
@@ -61,7 +57,7 @@ void NowPlaying::drawAlbumArt(const char* url) {
 
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    
+
     int httpCode = -1;
     String urlStr = String(url);
 
@@ -81,13 +77,13 @@ void NowPlaying::drawAlbumArt(const char* url) {
         Serial.print("[Sonos] Connection failed (error: ");
         Serial.print(http.errorToString(httpCode));
         Serial.println(")");
-        
+
         if (urlStr.indexOf("192.168.") == -1) {
             Serial.println("[Sonos] External URL failed, checking DNS...");
             IPAddress dns(8, 8, 8, 8);
             WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), dns);
             delay(500);
-            
+
             if (urlStr.startsWith("https://")) {
                 WiFiClientSecure secureClient;
                 secureClient.setInsecure();
@@ -113,14 +109,13 @@ void NowPlaying::drawAlbumArt(const char* url) {
 
             uint8_t* buffer = (uint8_t*)malloc(len);
             if (buffer) {
-                int read = http.getStream().readBytes(buffer, len);
-                if (read > 0) {
+                if (http.getStream().readBytes(buffer, len) > 0) {
                     TJpgDec.setCallback(tft_output);
                     uint16_t w = 0, h = 0;
-                    if (TJpgDec.getJpgSize(&w, &h, buffer, read) == JDR_OK) {
+                    if (TJpgDec.getJpgSize(&w, &h, buffer, len) == JDR_OK) {
                         uint8_t scale = 1;
-                        if (w > 80 * 4 || h > 80 * 4) scale = 8;
-                        else if (w > 80 * 2 || h > 80 * 2) scale = 4;
+                        if (w > 320 || h > 320) scale = 8;
+                        else if (w > 160 || h > 160) scale = 4;
                         else if (w > 80 || h > 80) scale = 2;
 
                         TJpgDec.setJpgScale(scale);
@@ -130,7 +125,7 @@ void NowPlaying::drawAlbumArt(const char* url) {
                         int y = 58 + (94 - drawH) / 2;
 
                         tft.fillRect(0, 58, 240, 94, ST77XX_BLACK);
-                        TJpgDec.drawJpg(x, y, buffer, read);
+                        TJpgDec.drawJpg(x, y, buffer, len);
                     } else {
                         drawAlbumArt();
                     }
@@ -146,31 +141,23 @@ void NowPlaying::drawAlbumArt(const char* url) {
 
 void NowPlaying::drawTrackInfo(const char* song, const char* artist, const char* album) {
     tft.setTextColor(ST77XX_WHITE);
-    
-    // Clear the track info area
     tft.fillRect(0, 180, 240, 70, ST77XX_BLACK);
-    
-    // 1. Draw Song Title with dynamic scaling/wrapping
+
     tft.setFont();
     uint8_t textSize = 2;
-    int16_t charWidth = 6 * textSize;
-    int16_t maxCharsLine = 240 / charWidth;
     int16_t songLen = strlen(song);
 
-    if (songLen > maxCharsLine) {
-        // If it's too long for size 2, try size 1 or wrap
-        if (songLen <= (240 / 6)) { // Fits in one line at size 1
-            textSize = 1;
-            tft.setTextSize(1);
-            tft.setCursor(centerX(song, 1), 183);
-            tft.print(song);
-        } else {
-            // Wrap at size 1
-            tft.setTextSize(1);
+    if (songLen > (240 / 12)) {
+        textSize = 1;
+        tft.setTextSize(1);
+        if (songLen > (240 / 6)) {
             tft.setTextWrap(true);
             tft.setCursor(5, 183);
             tft.print(song);
             tft.setTextWrap(false);
+        } else {
+            tft.setCursor(centerX(song, 1), 183);
+            tft.print(song);
         }
     } else {
         tft.setTextSize(2);
@@ -178,11 +165,8 @@ void NowPlaying::drawTrackInfo(const char* song, const char* artist, const char*
         tft.print(song);
     }
 
-    // 2. Draw Artist and Album
     tft.setTextSize(1);
-    tft.setTextColor(0xAD55); // Grayish
-    
-    // Determine Y offset based on whether song title likely took 1 or 2 lines
+    tft.setTextColor(0xAD55);
     int artistY = (textSize == 1 && songLen > (240 / 6)) ? 213 : 210;
 
     tft.setCursor(centerX(artist, 1), artistY);
@@ -207,24 +191,17 @@ void NowPlaying::drawProgressBar(int position, int duration) {
     int progress = (duration > 0) ? (position * 100) / duration : 0;
     if (progress > 100) progress = 100;
 
-    int barWidth = 130;
-    int x = 10;
-    int y = 162;
-    int h = 10;
-
+    int barWidth = 130, x = 10, y = 162, h = 10;
     int fillWidth = map(progress, 0, 100, 0, barWidth);
 
-    // Draw background and progress
-    tft.fillRect(x, y, barWidth, h, 0x4208); // Dark gray
-    tft.fillRect(x, y, fillWidth, h, 0x5FF3); // Cyan-ish
+    tft.fillRect(x, y, barWidth, h, 0x4208); // Background
+    tft.fillRect(x, y, fillWidth, h, 0x5FF3); // Progress
 
-    // Draw time text: 00:00 / 00:00
     String timeText = formatTime(position) + " / " + formatTime(duration);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.fillRect(x + barWidth + 5, y - 2, 240 - (x + barWidth + 5), h + 4, ST77XX_BLACK);
     tft.setFont();
     tft.setTextSize(1);
-    tft.setTextColor(ST77XX_WHITE);
-    // Clear text area
-    tft.fillRect(x + barWidth + 5, y - 2, 240 - (x + barWidth + 5), h + 4, ST77XX_BLACK);
     tft.setCursor(x + barWidth + 10, y + 1);
     tft.print(timeText);
 }
