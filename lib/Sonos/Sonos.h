@@ -64,7 +64,9 @@ private:
     static const char* GET_TRANSPORT_INFO_TEMPLATE;
     
     bool parseDeviceDescription(const String& xml, SonosDevice& device);
-    String extractXmlValue(const String& xml, const String& tag);
+    bool getXmlValue(const String& xml, const String& tag, String& value, const char* context, bool required = true);
+    bool parseTimeToSeconds(const String& value, int& seconds, const char* context);
+    String summarizeXml(const String& xml, int maxLen = 200);
     SonosResult sendSoapRequest(const String& deviceIP, const String& service, 
                                const String& action, const String& body, String& response);
     String formatSoapRequest(const String& service, const String& action, const String& body);

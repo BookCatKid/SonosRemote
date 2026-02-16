@@ -1,5 +1,5 @@
 #include "Sonos.h"
-#include <ArduinoJson.h>
+#include "SonosXmlParser.h"
 
 // Static constants
 const char* Sonos::SSDP_MULTICAST_IP = "239.255.255.250";
@@ -180,29 +180,62 @@ void Sonos::updateDiscovery() {
 }
 
 bool Sonos::parseDeviceDescription(const String& xml, SonosDevice& device) {
-    device.name = extractXmlValue(xml, "roomName");
-    device.uuid = extractXmlValue(xml, "UDN");
+    if (!getXmlValue(xml, "roomName", device.name, "device description", true)) {
+        return false;
+    }
+    getXmlValue(xml, "UDN", device.uuid, "device description", false);
 
-    String speakerSize = extractXmlValue(xml, "internalSpeakerSize");
-    if (speakerSize.length() > 0) {
-        if (speakerSize.toInt() < 0) return false;
+    String speakerSize;
+    if (getXmlValue(xml, "internalSpeakerSize", speakerSize, "device description", false)) {
+        int parsedSize = 0;
+        String parseError;
+        bool parsed = SonosXmlParser::parseInt(speakerSize, parsedSize, parseError);
+        if (parsed && parsedSize < 0) {
+            parseError = "must be non-negative";
+        }
+        if (!parsed || parsedSize < 0) {
+            logMessage("XML WARN (device description): invalid <internalSpeakerSize> value '" + speakerSize + "' (" + parseError + ")");
+            return false;
+        }
     }
 
     return device.name.length() > 0;
 }
 
-String Sonos::extractXmlValue(const String& xml, const String& tag) {
-    String startTag = "<" + tag + ">";
-    String endTag = "</" + tag + ">";
+bool Sonos::getXmlValue(const String& xml, const String& tag, String& value, const char* context, bool required) {
+    SonosXmlParser::XmlLookupResult result = SonosXmlParser::findTagValue(xml, tag);
+    if (result.success) {
+        value = result.value;
+        return true;
+    }
 
-    int startPos = xml.indexOf(startTag);
-    if (startPos == -1) return "";
+    value = "";
+    String level = required ? "ERROR" : "WARN";
+    String msg = "XML " + level + " (" + String(context) + "): " + result.error;
+    if (required || _config.enableVerboseLogging) {
+        msg += " | payload=" + summarizeXml(xml);
+    }
+    logMessage(msg);
+    return false;
+}
 
-    startPos += startTag.length();
-    int endPos = xml.indexOf(endTag, startPos);
-    if (endPos == -1) return "";
+bool Sonos::parseTimeToSeconds(const String& value, int& seconds, const char* context) {
+    String parseError;
+    if (SonosXmlParser::parseTimeToSeconds(value, seconds, parseError)) {
+        return true;
+    }
 
-    return xml.substring(startPos, endPos);
+    logMessage("XML WARN (" + String(context) + "): invalid time value '" + value + "' (" + parseError + ")");
+    return false;
+}
+
+String Sonos::summarizeXml(const String& xml, int maxLen) {
+    String compact = xml;
+    compact.replace("\r", " ");
+    compact.replace("\n", " ");
+    compact.trim();
+    if (compact.length() <= maxLen) return compact;
+    return compact.substring(0, maxLen) + "...";
 }
 
 // Volume control implementation
@@ -231,9 +264,17 @@ SonosResult Sonos::getVolume(const String& deviceIP, int& volume) {
                                         VOLUME_GET_TEMPLATE, response);
 
     if (result == SonosResult::SUCCESS) {
-        String volumeStr = extractXmlValue(response, "CurrentVolume");
-        if (volumeStr.length() > 0) {
-            volume = volumeStr.toInt();
+        String volumeStr;
+        if (getXmlValue(response, "CurrentVolume", volumeStr, "GetVolume response", true)) {
+            String parseError;
+            bool parsed = SonosXmlParser::parseInt(volumeStr, volume, parseError);
+            if (parsed && (volume < 0 || volume > 100)) {
+                parseError = "out of expected range 0..100";
+            }
+            if (!parsed || volume < 0 || volume > 100) {
+                logMessage("XML ERROR (GetVolume response): invalid <CurrentVolume> value '" + volumeStr + "' (" + parseError + ")");
+                return SonosResult::ERROR_SOAP_FAULT;
+            }
             logMessage("Current volume: " + String(volume) + " on " + deviceIP);
         } else {
             return SonosResult::ERROR_SOAP_FAULT;
@@ -423,7 +464,8 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
                                         GET_POSITION_INFO_TEMPLATE, response);
 
     if (result == SonosResult::SUCCESS) {
-        String trackUri = extractXmlValue(response, "TrackURI");
+        String trackUri;
+        getXmlValue(response, "TrackURI", trackUri, "GetPositionInfo response", false);
         if (trackUri.startsWith("x-rincon:")) {
             String masterUuid = trackUri.substring(9);
             logMessage("Redirecting to coordinator: " + masterUuid);
@@ -442,21 +484,17 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
             return SonosResult::ERROR_INVALID_DEVICE;
         }
 
-        String metadata = extractXmlValue(response, "TrackMetaData");
+        String metadata;
+        getXmlValue(response, "TrackMetaData", metadata, "GetPositionInfo response", false);
         if (metadata.length() > 0 && metadata != "NOT_IMPLEMENTED") {
-            metadata.replace("&amp;", "&");
-            metadata.replace("&lt;", "<");
-            metadata.replace("&gt;", ">");
-            metadata.replace("&quot;", "\"");
-            metadata.replace("&apos;", "'");
-
-            title = extractXmlValue(metadata, "dc:title");
-            artist = extractXmlValue(metadata, "dc:creator");
-            album = extractXmlValue(metadata, "upnp:album");
-            albumArtUrl = extractXmlValue(metadata, "upnp:albumArtURI");
+            getXmlValue(metadata, "dc:title", title, "TrackMetaData", false);
+            getXmlValue(metadata, "dc:creator", artist, "TrackMetaData", false);
+            getXmlValue(metadata, "upnp:album", album, "TrackMetaData", false);
+            getXmlValue(metadata, "upnp:albumArtURI", albumArtUrl, "TrackMetaData", false);
 
             if (title.length() == 0) {
-                String streamContent = extractXmlValue(metadata, "r:streamContent");
+                String streamContent;
+                getXmlValue(metadata, "r:streamContent", streamContent, "TrackMetaData", false);
                 if (streamContent.length() > 0) {
                     int dashPos = streamContent.indexOf(" - ");
                     if (dashPos != -1) {
@@ -475,19 +513,11 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
         if (title.length() == 0) title = "Unknown Title";
         if (artist.length() == 0) artist = "Unknown Artist";
 
-        String durationStr = extractXmlValue(response, "TrackDuration");
+        String durationStr;
+        getXmlValue(response, "TrackDuration", durationStr, "GetPositionInfo response", false);
         duration = 0;
         if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") {
-            int firstColon = durationStr.indexOf(':');
-            int lastColon = durationStr.lastIndexOf(':');
-            if (firstColon != -1 && lastColon != -1 && firstColon != lastColon) {
-                duration = durationStr.substring(0, firstColon).toInt() * 3600 +
-                           durationStr.substring(firstColon + 1, lastColon).toInt() * 60 +
-                           durationStr.substring(lastColon + 1).toInt();
-            } else if (firstColon != -1) {
-                duration = durationStr.substring(0, firstColon).toInt() * 60 +
-                           durationStr.substring(firstColon + 1).toInt();
-            }
+            parseTimeToSeconds(durationStr, duration, "TrackDuration");
         }
         logMessage("Track info: " + title + " by " + artist + " (Art: " + albumArtUrl + ")");
     }
@@ -502,7 +532,9 @@ SonosResult Sonos::getPlaybackState(const String& deviceIP, String& state) {
                                         GET_TRANSPORT_INFO_TEMPLATE, response);
 
     if (result == SonosResult::SUCCESS) {
-        state = extractXmlValue(response, "CurrentTransportState");
+        if (!getXmlValue(response, "CurrentTransportState", state, "GetTransportInfo response", true)) {
+            return SonosResult::ERROR_SOAP_FAULT;
+        }
         logMessage("Playback state: " + state);
     }
 
@@ -517,34 +549,18 @@ SonosResult Sonos::getPositionInfo(const String& deviceIP, int& position, int& d
                                         GET_POSITION_INFO_TEMPLATE, response);
 
     if (result == SonosResult::SUCCESS) {
-        String relTime = extractXmlValue(response, "RelTime");
+        String relTime;
+        getXmlValue(response, "RelTime", relTime, "GetPositionInfo response", false);
         position = 0;
         if (relTime.length() > 0 && relTime != "NOT_IMPLEMENTED") {
-            int firstColon = relTime.indexOf(':');
-            int lastColon = relTime.lastIndexOf(':');
-            if (firstColon != -1 && lastColon != -1 && firstColon != lastColon) {
-                position = relTime.substring(0, firstColon).toInt() * 3600 +
-                           relTime.substring(firstColon + 1, lastColon).toInt() * 60 +
-                           relTime.substring(lastColon + 1).toInt();
-            } else if (firstColon != -1) {
-                position = relTime.substring(0, firstColon).toInt() * 60 +
-                           relTime.substring(firstColon + 1).toInt();
-            }
+            parseTimeToSeconds(relTime, position, "RelTime");
         }
 
-        String durationStr = extractXmlValue(response, "TrackDuration");
+        String durationStr;
+        getXmlValue(response, "TrackDuration", durationStr, "GetPositionInfo response", false);
         duration = 0;
         if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") {
-            int firstColon = durationStr.indexOf(':');
-            int lastColon = durationStr.lastIndexOf(':');
-            if (firstColon != -1 && lastColon != -1 && firstColon != lastColon) {
-                duration = durationStr.substring(0, firstColon).toInt() * 3600 +
-                           durationStr.substring(firstColon + 1, lastColon).toInt() * 60 +
-                           durationStr.substring(lastColon + 1).toInt();
-            } else if (firstColon != -1) {
-                duration = durationStr.substring(0, firstColon).toInt() * 60 +
-                           durationStr.substring(firstColon + 1).toInt();
-            }
+            parseTimeToSeconds(durationStr, duration, "TrackDuration");
         }
     }
     return result;
