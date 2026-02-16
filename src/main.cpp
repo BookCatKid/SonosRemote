@@ -22,6 +22,8 @@
 #define BTN_UP    13
 #define BTN_DOWN  14
 #define BTN_CLICK 15
+#define BTN_VUP   12
+#define BTN_VDOWN 11
 
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 Adafruit_MCP23X17 mcp;
@@ -31,7 +33,7 @@ SpeakerList speakerList;
 DeviceCache deviceCache;
 SonosController sonosController(sonos);
 DiscoveryManager discoveryManager(sonos, deviceCache);
-ButtonHandler buttons(mcp, BTN_UP, BTN_DOWN, BTN_CLICK);
+ButtonHandler buttons(mcp, BTN_UP, BTN_DOWN, BTN_CLICK, BTN_VUP, BTN_VDOWN);
 
 int selectedIndex = 0;
 IPAddress selectedDeviceIP;
@@ -138,16 +140,32 @@ void handleSpeakerListNavigation() {
 }
 void handleNowPlayingNavigation() {
     if (buttons.clickPressed()) {
+        sonosController.togglePlayPause(selectedDeviceIP.toString());
+        lastRefreshTime = 0;
+        return;
+    }
+
+    if (buttons.clickLongPressed()) {
         currentScreen = SCREEN_SPEAKER_LIST;
         speakerList.draw(discoveryManager.getDevices());
         return;
     }
+
     if (buttons.upPressed()) {
         sonosController.next(selectedDeviceIP.toString());
         lastRefreshTime = 0;
     }
     if (buttons.downPressed()) {
         sonosController.previous(selectedDeviceIP.toString());
+        lastRefreshTime = 0;
+    }
+
+    if (buttons.volUpPressed()) {
+        sonosController.volumeUp(selectedDeviceIP.toString());
+        lastRefreshTime = 0;
+    }
+    if (buttons.volDownPressed()) {
+        sonosController.volumeDown(selectedDeviceIP.toString());
         lastRefreshTime = 0;
     }
 }
@@ -184,7 +202,9 @@ void updateNowPlayingScreen() {
     } else {
         nowPlaying.drawStatusBar("Offline");
     }
-}void setup() {
+}
+
+void setup() {
     Serial.begin(115200);
     Serial.println("Sonos Remote Starting...");
     deviceCache.begin();

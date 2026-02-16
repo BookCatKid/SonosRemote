@@ -453,9 +453,7 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
             title = extractXmlValue(metadata, "dc:title");
             artist = extractXmlValue(metadata, "dc:creator");
             album = extractXmlValue(metadata, "upnp:album");
-                    } else {
-                        title = streamContent;
-                    }
+            albumArtUrl = extractXmlValue(metadata, "upnp:albumArtURI");
 
             if (title.length() == 0) {
                 String streamContent = extractXmlValue(metadata, "r:streamContent");

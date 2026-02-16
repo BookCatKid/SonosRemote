@@ -49,6 +49,14 @@ void SonosController::pause(const String& ip) {
     _sonos.pause(ip);
 }
 
+void SonosController::togglePlayPause(const String& ip) {
+    if (_currentTrack.playbackState == "PLAYING" || _currentTrack.playbackState == "TRANSITIONING") {
+        _sonos.pause(ip);
+    } else {
+        _sonos.play(ip);
+    }
+}
+
 void SonosController::next(const String& ip) {
     _sonos.next(ip);
 }
@@ -59,5 +67,13 @@ void SonosController::previous(const String& ip) {
 
 void SonosController::setVolume(const String& ip, int volume) {
     _sonos.setVolume(ip, volume);
+}
+
+void SonosController::volumeUp(const String& ip) {
+    _sonos.increaseVolume(ip, 5);
+}
+
+void SonosController::volumeDown(const String& ip) {
+    _sonos.decreaseVolume(ip, 5);
 }
 

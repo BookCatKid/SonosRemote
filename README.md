@@ -15,6 +15,7 @@ brooo this is the most random list every but suuuuuuuuree.
 * **Microcontroller:** [XIAO ESP32S3 3PCS Pack- 2.4GHz WiFi, BLE 5.0, 8MB PSRAM, 8MB Flash, Dual-core, Battery Charge Supported, Power Efficiency and Rich Interface, Ideal for Smart Homes, IoT, Wearable Devices, Robotics.](https://www.amazon.com/dp/B0DJ6NQFKX)
 * **I/O Expander:** [MCP23017 Serial Interface Module IIC I2C SPI Bidirectional 16-Bit I/O Expander Pins 10Mhz Serial Interface Module](https://www.amazon.com/gp/product/B0DSLPRKKZ)
 * **Display:** [1.69 Inch 1.69" Color TFT Display Module HD IPS LCD LED Screen 240X280 SPI Interface ST7789 Controller for Arduino](https://www.amazon.com/dp/B0DQ4R95TZ) (This is a very crappy display that was like the cheapest one i could find, might be made larger later).
+* 5 buttons for control (Up, Down, Click, Volume Up, Volume Down).
 * A messy pile of jumper wires.
 
 ## How it works (mostly)
