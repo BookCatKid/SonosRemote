@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
+#include <Adafruit_MCP23X17.h>
 #include <Sonos.h>
 #include <vector>
 #include "NowPlaying.h"
@@ -15,14 +16,15 @@
 #define TFT_CS  D3
 #define TFT_DC  D2
 #define TFT_RST D1
-#define TFT_BL  D4
+#define TFT_BL  D6 // Backlight moved to D6
 
-// Button pins (using internal pull-ups, connect button between pin and GND)
-#define BTN_UP    D5
-#define BTN_DOWN  D6
-#define BTN_CLICK D7
+// Button pins on MCP23017
+#define BTN_UP    13
+#define BTN_DOWN  14
+#define BTN_CLICK 15
 
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+Adafruit_MCP23X17 mcp;
 Sonos sonos;
 NowPlaying nowPlaying;
 SpeakerList speakerList;
@@ -31,7 +33,7 @@ SonosController sonosController(sonos);
 DiscoveryManager discoveryManager(sonos, deviceCache);
 
 // Button handler
-ButtonHandler buttons(BTN_UP, BTN_DOWN, BTN_CLICK);
+ButtonHandler buttons(mcp, BTN_UP, BTN_DOWN, BTN_CLICK);
 
 // Navigation state (only for speaker list)
 int selectedIndex = 0;
@@ -203,6 +205,11 @@ void updateNowPlayingScreen() {
     Serial.println("Sonos Remote Starting...");
 
     deviceCache.begin();
+
+    // Initialize I2C and MCP23017
+    if (!mcp.begin_I2C(0x20)) {
+        Serial.println("Error: MCP23017 not found!");
+    }
 
     // Enable logging for the Sonos library
     SonosConfig config;

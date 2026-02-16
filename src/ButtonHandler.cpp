@@ -1,23 +1,23 @@
 #include "ButtonHandler.h"
 
-ButtonHandler::ButtonHandler(int upPin, int downPin, int clickPin)
-    : upPin(upPin), downPin(downPin), clickPin(clickPin),
+ButtonHandler::ButtonHandler(Adafruit_MCP23X17& mcp, int upPin, int downPin, int clickPin)
+    : _mcp(mcp), upPin(upPin), downPin(downPin), clickPin(clickPin),
       upState(false), downState(false), clickState(false),
       upPrev(false), downPrev(false), clickPrev(false),
       upJustPressed(false), downJustPressed(false), clickJustPressed(false),
       lastDebounceTime(0) {}
 
 void ButtonHandler::begin() {
-    pinMode(upPin, INPUT_PULLUP);
-    pinMode(downPin, INPUT_PULLUP);
-    pinMode(clickPin, INPUT_PULLUP);
+    _mcp.pinMode(upPin, INPUT_PULLUP);
+    _mcp.pinMode(downPin, INPUT_PULLUP);
+    _mcp.pinMode(clickPin, INPUT_PULLUP);
 }
 
 void ButtonHandler::update() {
     // Read current button states (LOW when pressed due to pull-up)
-    bool upReading = !digitalRead(upPin);
-    bool downReading = !digitalRead(downPin);
-    bool clickReading = !digitalRead(clickPin);
+    bool upReading = (_mcp.digitalRead(upPin) == LOW);
+    bool downReading = (_mcp.digitalRead(downPin) == LOW);
+    bool clickReading = (_mcp.digitalRead(clickPin) == LOW);
 
     // Check if any button state changed
     if (upReading != upPrev || downReading != downPrev || clickReading != clickPrev) {
