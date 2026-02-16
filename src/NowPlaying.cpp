@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
+#include <TJpg_Decoder.h>
+#include <HTTPClient.h>
 #include "NowPlaying.h"
 #include "FreeMono9pt7b.h"
 #include "Petme8x8.h"
@@ -10,6 +12,13 @@ extern Adafruit_ST7789 tft;
 
 extern const unsigned char image_song_cover_bits[];
 extern const unsigned char image_volume_normal_bits[];
+
+// Callback function to draw decoded JPEG blocks
+static bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+    if (y >= tft.height()) return false;
+    tft.drawRGBBitmap(x, y, bitmap, w, h);
+    return true;
+}
 
 void NowPlaying::drawStatic() {
     tft.fillScreen(ST77XX_BLACK);
@@ -30,6 +39,56 @@ void NowPlaying::drawStatusBar(const char* statusText) {
 
 void NowPlaying::drawAlbumArt() {
     tft.drawBitmap(60, 62, image_song_cover_bits, 120, 120, ST77XX_WHITE);
+}
+
+void NowPlaying::drawAlbumArt(const char* url) {
+    if (url == nullptr || strlen(url) == 0) {
+        drawAlbumArt(); // Fallback to default
+        return;
+    }
+
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+        int len = http.getSize();
+        if (len > 0) {
+            uint8_t* buffer = (uint8_t*)malloc(len);
+            if (buffer) {
+                WiFiClient* stream = http.getStreamPtr();
+                stream->readBytes(buffer, len);
+                
+                TJpgDec.setCallback(tft_output);
+                
+                uint16_t w = 0, h = 0;
+                TJpgDec.getJpgSize(&w, &h, buffer, len);
+                
+                // Target max dimension of ~140 pixels
+                uint8_t scale = 1;
+                if (w > 140 * 4 || h > 140 * 4) scale = 8;
+                else if (w > 140 * 2 || h > 140 * 2) scale = 4;
+                else if (w > 140 || h > 140) scale = 2;
+                
+                TJpgDec.setJpgScale(scale);
+                
+                int drawW = w / scale;
+                int drawH = h / scale;
+                int x = (240 - drawW) / 2;
+                int y = 62 + (120 - drawH) / 2; // Center within the 120px vertical slot
+                
+                // Clear the middle area before drawing (from below speaker info to above progress bar)
+                tft.fillRect(0, 58, 240, 132, ST77XX_BLACK);
+                
+                TJpgDec.drawJpg(x, y, buffer, len);
+                
+                free(buffer);
+            }
+        }
+    } else {
+        drawAlbumArt(); // Fallback
+    }
+    http.end();
 }
 
 void NowPlaying::drawTrackInfo(const char* song, const char* artist) {

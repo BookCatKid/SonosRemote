@@ -148,6 +148,8 @@ void handleNowPlayingNavigation() {
     }
 }
 
+String lastAlbumArtUrl = "";
+
 void updateNowPlayingScreen() {
     if (wifiState != WIFI_CONNECTED) return;
 
@@ -155,11 +157,17 @@ void updateNowPlayingScreen() {
         const auto& data = sonosController.getTrackData();
         nowPlaying.drawTrackInfo(data.title.c_str(), data.artist.c_str());
         
+        if (data.albumArtUrl != lastAlbumArtUrl) {
+            lastAlbumArtUrl = data.albumArtUrl;
+            nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
+        }
+
         int progressPercent = 0;
         if (data.duration > 0) {
             progressPercent = (data.position * 100) / data.duration;
         }
         nowPlaying.drawProgressBar(progressPercent);
+        nowPlaying.drawVolume(data.volume);
         nowPlaying.drawStatusBar(data.playbackState.c_str());
     } else {
         nowPlaying.drawStatusBar("Offline");
@@ -168,7 +176,14 @@ void updateNowPlayingScreen() {
 
 void setup() {
     Serial.begin(115200);
+    Serial.println("Sonos Remote Starting...");
+
     deviceCache.begin();
+
+    // Enable logging for the Sonos library
+    SonosConfig config;
+    config.enableLogging = true;
+    sonos.setConfig(config);
 
     pinMode(TFT_BL, OUTPUT);
     digitalWrite(TFT_BL, HIGH);

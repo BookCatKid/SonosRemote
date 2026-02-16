@@ -64,7 +64,7 @@ private:
     
     // Private methods
     bool parseDeviceDescription(const String& xml, SonosDevice& device);
-    String extractXmlValue(const String& xml, const String& tag, bool isEscaped = false);
+    String extractXmlValue(const String& xml, const String& tag);
     SonosResult sendSoapRequest(const String& deviceIP, const String& service, 
                                const String& action, const String& body, String& response);
     String formatSoapRequest(const String& service, const String& action, const String& body);
@@ -103,7 +103,7 @@ public:
     SonosResult previous(const String& deviceIP);
     
     // Track information
-    SonosResult getTrackInfo(const String& deviceIP, String& title, String& artist, String& album, int& duration);
+    SonosResult getTrackInfo(const String& deviceIP, String& title, String& artist, String& album, String& albumArtUrl, int& duration);
     SonosResult getPlaybackState(const String& deviceIP, String& state);
     SonosResult getPositionInfo(const String& deviceIP, int& position, int& duration);
     

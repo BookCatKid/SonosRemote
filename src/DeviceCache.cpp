@@ -25,7 +25,7 @@ std::vector<CachedDevice> DeviceCache::loadDevices() {
         return devices;
     }
     
-    StaticJsonDocument<4096> doc;
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
     
@@ -50,11 +50,11 @@ bool DeviceCache::saveDevices(const std::vector<SonosDevice>& devices) {
         return false;
     }
     
-    StaticJsonDocument<4096> doc;
+    JsonDocument doc;
     JsonArray array = doc.to<JsonArray>();
     
     for (const auto& device : devices) {
-        JsonObject obj = array.createNestedObject();
+        JsonObject obj = array.add<JsonObject>();
         obj["name"] = device.name;
         obj["ip"] = device.ip;
     }
