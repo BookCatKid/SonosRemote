@@ -43,10 +43,6 @@ bool DiscoveryManager::update() {
         return true;
     }
 
-    if (_lastDiscoveryTime != 0 && millis() - _lastDiscoveryTime > DISCOVERY_INTERVAL) {
-        forceRefresh();
-        return true;
-    }
     return false;
 }
 

@@ -13,6 +13,7 @@
 #include "SonosController.h"
 #include "DiscoveryManager.h"
 #include "AppLogger.h"
+#include "SonosEventManager.h"
 
 #define TFT_CS  D3
 #define TFT_DC  D2
@@ -34,6 +35,7 @@ SpeakerList speakerList;
 DeviceCache deviceCache;
 SonosController sonosController(sonos);
 DiscoveryManager discoveryManager(sonos, deviceCache);
+SonosEventManager eventManager(8080);
 ButtonHandler buttons(mcp, BTN_UP, BTN_DOWN, BTN_CLICK, BTN_VUP, BTN_VDOWN);
 
 int selectedIndex = 0;
@@ -43,9 +45,17 @@ IPAddress selectedDeviceIP;
 String lastAlbumArtUrl = "";
 String lastTitle = "";
 String lastArtist = "";
+String lastAlbum = "";
 String lastPlaybackState = "";
-int lastProgressPercent = -1;
+int lastPositionSeconds = -1;
+int lastDurationSeconds = -1;
 int lastVolume = -1;
+bool forcePositionSync = false;
+unsigned long lastPositionSyncMs = 0;
+const unsigned long POSITION_SYNC_INTERVAL_MS = 10000;
+bool needsInitialNowPlayingFetch = false;
+unsigned long lastInitialFetchAttemptMs = 0;
+const unsigned long INITIAL_FETCH_RETRY_INTERVAL_MS = 3000;
 
 enum ScreenState {
     SCREEN_SPEAKER_LIST,
@@ -53,8 +63,6 @@ enum ScreenState {
 };
 
 ScreenState currentScreen = SCREEN_SPEAKER_LIST;
-unsigned long lastRefreshTime = 0;
-const unsigned long REFRESH_INTERVAL = 2000; // Refresh every 2 seconds on Now Playing
 
 enum WiFiState {
     WIFI_DISCONNECTED,
@@ -97,6 +105,7 @@ void checkWiFiConnection() {
             wifiState = WIFI_CONNECTED;
             LOG_INFO("wifi", "WiFi connected: " + WiFi.localIP().toString());
             sonos.begin();
+            eventManager.begin();
         } else if (millis() - wifiConnectStartTime > WIFI_TIMEOUT) {
             wifiState = WIFI_DISCONNECTED;
             LOG_WARN("wifi", "WiFi connect timeout, retrying");
@@ -129,14 +138,21 @@ void handleSpeakerListNavigation() {
         if (selectedIndex < (int)devices.size()) {
             selectedDeviceIP.fromString(devices[selectedIndex].ip.c_str());
             currentScreen = SCREEN_NOW_PLAYING;
+            forcePositionSync = true;
+            lastPositionSyncMs = 0;
+            needsInitialNowPlayingFetch = true;
+            lastInitialFetchAttemptMs = 0;
+
+            // Subscribe to events
+            eventManager.subscribe(selectedDeviceIP.toString(), "AVTransport");
+            eventManager.subscribe(selectedDeviceIP.toString(), "RenderingControl");
 
             // Full redraw reset
-            lastAlbumArtUrl = lastTitle = lastArtist = lastPlaybackState = "";
-            lastProgressPercent = lastVolume = -1;
+            lastAlbumArtUrl = lastTitle = lastArtist = lastAlbum = lastPlaybackState = "";
+            lastPositionSeconds = lastDurationSeconds = lastVolume = -1;
 
             nowPlaying.drawStatic();
             nowPlaying.drawSpeakerInfo(devices[selectedIndex].name.c_str());
-            lastRefreshTime = 0;
         } else if (wifiState == WIFI_CONNECTED) {
             speakerList.updateHeader("Scanning...");
             discoveryManager.forceRefresh();
@@ -156,11 +172,14 @@ void handleSpeakerListNavigation() {
 void handleNowPlayingNavigation() {
     if (buttons.clickPressed()) {
         sonosController.togglePlayPause(selectedDeviceIP.toString());
-        lastRefreshTime = 0;
         return;
     }
 
     if (buttons.clickLongPressed()) {
+        eventManager.unsubscribe(selectedDeviceIP.toString(), "AVTransport");
+        eventManager.unsubscribe(selectedDeviceIP.toString(), "RenderingControl");
+        forcePositionSync = false;
+        needsInitialNowPlayingFetch = false;
         currentScreen = SCREEN_SPEAKER_LIST;
         speakerList.draw(discoveryManager.getDevices());
         return;
@@ -168,68 +187,88 @@ void handleNowPlayingNavigation() {
 
     if (buttons.upPressed()) {
         sonosController.next(selectedDeviceIP.toString());
-        lastRefreshTime = 0;
     }
     if (buttons.downPressed()) {
         sonosController.previous(selectedDeviceIP.toString());
-        lastRefreshTime = 0;
     }
 
     if (buttons.volUpPressed()) {
         sonosController.volumeUp(selectedDeviceIP.toString());
-        lastRefreshTime = 0;
     }
     if (buttons.volDownPressed()) {
         sonosController.volumeDown(selectedDeviceIP.toString());
-        lastRefreshTime = 0;
     }
 }
 
 void updateNowPlayingScreen() {
     if (wifiState != WIFI_CONNECTED) return;
+    sonosController.tick();
+    unsigned long nowMs = millis();
 
-    if (sonosController.update(selectedDeviceIP.toString())) {
-        const auto& data = sonosController.getTrackData();
+    if (needsInitialNowPlayingFetch &&
+        (lastInitialFetchAttemptMs == 0 || nowMs - lastInitialFetchAttemptMs >= INITIAL_FETCH_RETRY_INTERVAL_MS)) {
+        lastInitialFetchAttemptMs = nowMs;
+        if (sonosController.update(selectedDeviceIP.toString())) {
+            needsInitialNowPlayingFetch = false;
+            forcePositionSync = false;
+            lastPositionSyncMs = nowMs;
+            LOG_DEBUG("control", "Initial now-playing fetch succeeded");
+        } else {
+            LOG_WARN("control", "Initial now-playing fetch failed; retry scheduled");
+        }
+    }
 
-        if (data.title != lastTitle || data.artist != lastArtist) {
-            lastTitle = data.title;
-            lastArtist = data.artist;
-            nowPlaying.drawTrackInfo(data.title.c_str(), data.artist.c_str(), data.album.c_str());
-        }
+    const auto& preSyncData = sonosController.getTrackData();
+    bool isPlaying = preSyncData.playbackState == "PLAYING" || preSyncData.playbackState == "TRANSITIONING";
+    bool periodicSyncDue = isPlaying && (nowMs - lastPositionSyncMs >= POSITION_SYNC_INTERVAL_MS);
 
-        int progressPercent = (data.duration > 0) ? (data.position * 100) / data.duration : 0;
-        if (progressPercent != lastProgressPercent) {
-            lastProgressPercent = progressPercent;
-            nowPlaying.drawProgressBar(data.position, data.duration);
+    if (forcePositionSync || periodicSyncDue) {
+        if (sonosController.refreshPosition(selectedDeviceIP.toString(), true)) {
+            lastPositionSyncMs = nowMs;
         }
-        if (data.volume != lastVolume) {
-            lastVolume = data.volume;
-            nowPlaying.drawVolume(data.volume);
-        }
-        if (data.playbackState != lastPlaybackState) {
-            lastPlaybackState = data.playbackState;
-            nowPlaying.drawStatusBar(data.playbackState.c_str());
-        }
+        forcePositionSync = false;
+    }
 
-        if (data.albumArtUrl != lastAlbumArtUrl) {
-            lastAlbumArtUrl = data.albumArtUrl;
-            nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
-        }
-    } else {
-        nowPlaying.drawStatusBar("Offline");
+    const auto& data = sonosController.getTrackData();
+
+    if (data.title != lastTitle || data.artist != lastArtist || data.album != lastAlbum) {
+        lastTitle = data.title;
+        lastArtist = data.artist;
+        lastAlbum = data.album;
+        nowPlaying.drawTrackInfo(data.title.c_str(), data.artist.c_str(), data.album.c_str());
+    }
+
+    if (data.position != lastPositionSeconds || data.duration != lastDurationSeconds) {
+        lastPositionSeconds = data.position;
+        lastDurationSeconds = data.duration;
+        nowPlaying.drawProgressBar(data.position, data.duration);
+    }
+    if (data.volume != lastVolume) {
+        lastVolume = data.volume;
+        nowPlaying.drawVolume(data.volume);
+    }
+    if (data.playbackState != lastPlaybackState) {
+        lastPlaybackState = data.playbackState;
+        nowPlaying.drawStatusBar(data.playbackState.c_str());
+    }
+
+    if (data.albumArtUrl != lastAlbumArtUrl) {
+        lastAlbumArtUrl = data.albumArtUrl;
+        nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
     }
 }
 
 void setup() {
+    WiFi.mode(WIFI_STA); // Initialize stack early
     Serial.begin(115200);
     AppLogger::begin(Serial, LogLevel::DEBUG);
     AppLogger::setEnabled(true);
 
     // `useAllowList=false` means allow all channels (except blocked ones below).
     // `useAllowList=true` means only channels in this list are shown.
-    const bool useAllowList = false;
+    const bool useAllowList = true;
     const char* allowedLogChannels[] = {
-        "core", "wifi", "discovery", "cache", "xml", "soap", "control", "playback", "image", "ui"
+        "core", "wifi", "discovery", "cache", "xml", "soap", "control", "playback", "image", "ui", "events"
     };
     AppLogger::clearAllowedChannels();
     if (useAllowList) {
@@ -275,6 +314,31 @@ void setup() {
     discoveryManager.setDiscoveryCallback([](const std::vector<SonosDevice>& devices) {
         if (currentScreen == SCREEN_SPEAKER_LIST) speakerList.refreshDevices(devices);
     });
+
+    eventManager.setEventCallback([](const String& ip, const String& service, const String& data) {
+        (void)service;
+        if (currentScreen != SCREEN_NOW_PLAYING || ip != selectedDeviceIP.toString()) {
+            return;
+        }
+
+        LOG_DEBUG("core", "Event received from " + ip);
+        sonosController.parseEvent(data);
+
+        // Ensure album art URL is absolute if relative
+        auto& track = const_cast<TrackData&>(sonosController.getTrackData());
+        if (track.albumArtUrl.length() > 0 && track.albumArtUrl.startsWith("/")) {
+            track.albumArtUrl = "http://" + ip + ":1400" + track.albumArtUrl;
+        }
+
+        if (data.indexOf("CurrentTrackURI") != -1 ||
+            data.indexOf("CurrentTrackMetaData") != -1 ||
+            data.indexOf("CurrentTrack val=") != -1) {
+            forcePositionSync = true;
+            LOG_DEBUG("control", "Track-related event received; scheduling position sync");
+        }
+
+    });
+
     speakerList.setSelectedIndex(0);
     speakerList.draw(discoveryManager.getDevices());
 
@@ -284,6 +348,7 @@ void setup() {
 void loop() {
     checkWiFiConnection();
     buttons.update();
+    eventManager.update();
 
     if (currentScreen == SCREEN_SPEAKER_LIST) {
         handleSpeakerListNavigation();
@@ -297,11 +362,6 @@ void loop() {
         }
     } else if (currentScreen == SCREEN_NOW_PLAYING) {
         handleNowPlayingNavigation();
-
-        unsigned long currentMillis = millis();
-        if (currentMillis - lastRefreshTime >= REFRESH_INTERVAL) {
-            lastRefreshTime = currentMillis;
-            updateNowPlayingScreen();
-        }
+        updateNowPlayingScreen();
     }
 }

@@ -301,6 +301,49 @@ XmlLookupResult findTagValue(const String& xml, const String& tag) {
     return result;
 }
 
+XmlLookupResult findAttributeValue(const String& xml, const String& tag, const String& attribute) {
+    XmlLookupResult result;
+    if (xml.length() == 0 || tag.length() == 0 || attribute.length() == 0) {
+        result.error = "Invalid parameters";
+        return result;
+    }
+
+    int scanPos = 0;
+    while (scanPos < static_cast<int>(xml.length())) {
+        int openBracketPos = xml.indexOf('<', scanPos);
+        if (openBracketPos == -1) break;
+
+        bool isClosingTag, isSelfClosingTag;
+        String tagName;
+        int tagEndPos;
+        String parseError;
+        if (!parseTagAt(xml, openBracketPos, isClosingTag, isSelfClosingTag, tagName, tagEndPos, parseError)) {
+            scanPos = openBracketPos + 1;
+            continue;
+        }
+
+        if (!isClosingTag && namesMatch(tagName, tag)) {
+            // Found the tag, now look for the attribute within <Tag ... >
+            String tagContent = xml.substring(openBracketPos, tagEndPos);
+            String searchPattern = attribute + "=\"";
+            int attrStart = tagContent.indexOf(searchPattern);
+            if (attrStart != -1) {
+                attrStart += searchPattern.length();
+                int attrEnd = tagContent.indexOf('"', attrStart);
+                if (attrEnd != -1) {
+                    result.success = true;
+                    result.value = decodeEntities(tagContent.substring(attrStart, attrEnd));
+                    return result;
+                }
+            }
+        }
+        scanPos = tagEndPos + 1;
+    }
+
+    result.error = "Attribute '" + attribute + "' in tag <" + tag + "> not found";
+    return result;
+}
+
 bool parseTimeToSeconds(const String& value, int& seconds, String& error) {
     seconds = 0;
     String input = value;

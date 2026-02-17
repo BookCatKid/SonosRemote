@@ -18,6 +18,8 @@ public:
     SonosController(Sonos& sonos);
 
     bool update(const String& ip);
+    bool refreshPosition(const String& ip, bool refreshDuration = true);
+    void tick();
     const TrackData& getTrackData() const { return _currentTrack; }
 
     void play(const String& ip);
@@ -29,7 +31,11 @@ public:
     void volumeUp(const String& ip);
     void volumeDown(const String& ip);
 
+    void parseEvent(const String& xml);
+
 private:
     Sonos& _sonos;
     TrackData _currentTrack;
+    unsigned long _lastTickMs = 0;
+    unsigned long _positionRemainderMs = 0;
 };
