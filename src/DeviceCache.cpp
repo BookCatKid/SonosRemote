@@ -1,14 +1,16 @@
 #include "DeviceCache.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include "AppLogger.h"
 
 const char* DeviceCache::CACHE_FILE = "/sonos_devices.json";
 
 bool DeviceCache::begin() {
     if (!LittleFS.begin(true)) {
-        Serial.println("Failed to mount LittleFS");
+        LOG_ERROR("cache", "Failed to mount LittleFS");
         return false;
     }
+    LOG_INFO("cache", "LittleFS mounted");
     filesystemReady = true;
     return true;
 }
@@ -30,7 +32,7 @@ std::vector<CachedDevice> DeviceCache::loadDevices() {
     file.close();
     
     if (error) {
-        Serial.println("Failed to parse device cache");
+        LOG_WARN("cache", "Failed to parse device cache");
         return devices;
     }
     
@@ -70,7 +72,9 @@ bool DeviceCache::saveDevices(const std::vector<SonosDevice>& devices) {
     file.close();
     
     if (success) {
-        Serial.println("Saved " + String(devices.size()) + " devices to cache");
+        LOG_INFO("cache", "Saved " + String(devices.size()) + " devices to cache");
+    } else {
+        LOG_WARN("cache", "Failed to write device cache");
     }
     
     return success;

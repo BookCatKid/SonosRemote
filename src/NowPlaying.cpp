@@ -6,6 +6,7 @@
 #include <WiFiClientSecure.h>
 #include "NowPlaying.h"
 #include "UIGlobals.h"
+#include "AppLogger.h"
 
 extern Adafruit_ST7789 tft;
 extern const unsigned char image_volume_normal_bits[];
@@ -50,7 +51,7 @@ void NowPlaying::drawAlbumArt(const char* url) {
         return;
     }
 
-    Serial.print("[Sonos] Fetching art: "); Serial.println(url);
+    LOG_DEBUG("image", "Fetching album art: " + String(url));
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     
@@ -68,7 +69,7 @@ void NowPlaying::drawAlbumArt(const char* url) {
         if (len > 0) {
             size_t freeHeap = ESP.getFreeHeap();
             if (freeHeap < (size_t)len + 8192) {
-                Serial.println("[Sonos] Not enough memory for image");
+                LOG_WARN("image", "Not enough memory for image. freeHeap=" + String(freeHeap) + " size=" + String(len));
                 drawAlbumArt();
                 http.end();
                 return;
@@ -93,12 +94,20 @@ void NowPlaying::drawAlbumArt(const char* url) {
 
                         tft.fillRect(0, 58, 240, 94, ST77XX_BLACK);
                         TJpgDec.drawJpg(x, y, buffer, len);
-                    } else drawAlbumArt();
+                    } else {
+                        LOG_WARN("image", "Failed to decode JPG metadata");
+                        drawAlbumArt();
+                    }
                 }
                 free(buffer);
+            } else {
+                LOG_WARN("image", "Failed to allocate image buffer");
             }
         }
-    } else drawAlbumArt();
+    } else {
+        LOG_WARN("image", "Album art fetch failed. HTTP code=" + String(httpCode));
+        drawAlbumArt();
+    }
     http.end();
 }
 

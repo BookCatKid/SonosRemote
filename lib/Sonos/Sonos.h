@@ -7,6 +7,7 @@
 #include <HTTPClient.h>
 #include <vector>
 #include <functional>
+#include "../../include/AppLogger.h"
 
 enum class SonosResult {
     SUCCESS = 0,
@@ -71,7 +72,7 @@ private:
                                const String& action, const String& body, String& response);
     String formatSoapRequest(const String& service, const String& action, const String& body);
     bool isValidIP(const String& ip);
-    void logMessage(const String& message);
+    void logMessage(LogLevel level, const char* channel, const String& message);
     
 public:
     Sonos();

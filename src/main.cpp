@@ -12,6 +12,7 @@
 #include "ButtonHandler.h"
 #include "SonosController.h"
 #include "DiscoveryManager.h"
+#include "AppLogger.h"
 
 #define TFT_CS  D3
 #define TFT_DC  D2
@@ -66,7 +67,19 @@ WiFiState previousWifiState = WIFI_DISCONNECTED;
 unsigned long wifiConnectStartTime = 0;
 const unsigned long WIFI_TIMEOUT = 30000; // 30 seconds timeout
 
+template <size_t N>
+static String formatChannelList(const char* const (&channels)[N], bool shouldDisplay = true) {
+    if (!shouldDisplay || N == 0) return "(none)";
+    String out;
+    for (size_t i = 0; i < N; i++) {
+        if (i > 0) out += ", ";
+        out += channels[i];
+    }
+    return out;
+}
+
 void startWiFiConnection() {
+    LOG_INFO("wifi", "Starting WiFi connection");
     WiFi.persistent(true);
     WiFi.mode(WIFI_STA);
 #if USE_STATIC_IP
@@ -82,9 +95,11 @@ void checkWiFiConnection() {
     if (wifiState == WIFI_CONNECTING) {
         if (WiFi.status() == WL_CONNECTED) {
             wifiState = WIFI_CONNECTED;
+            LOG_INFO("wifi", "WiFi connected: " + WiFi.localIP().toString());
             sonos.begin();
         } else if (millis() - wifiConnectStartTime > WIFI_TIMEOUT) {
             wifiState = WIFI_DISCONNECTED;
+            LOG_WARN("wifi", "WiFi connect timeout, retrying");
             WiFi.disconnect();
             delay(100);
             startWiFiConnection();
@@ -195,7 +210,7 @@ void updateNowPlayingScreen() {
             lastPlaybackState = data.playbackState;
             nowPlaying.drawStatusBar(data.playbackState.c_str());
         }
-        
+
         if (data.albumArtUrl != lastAlbumArtUrl) {
             lastAlbumArtUrl = data.albumArtUrl;
             nowPlaying.drawAlbumArt(data.albumArtUrl.c_str());
@@ -207,10 +222,41 @@ void updateNowPlayingScreen() {
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("Sonos Remote Starting...");
+    AppLogger::begin(Serial, LogLevel::DEBUG);
+    AppLogger::setEnabled(true);
+
+    // `useAllowList=false` means allow all channels (except blocked ones below).
+    // `useAllowList=true` means only channels in this list are shown.
+    const bool useAllowList = false;
+    const char* allowedLogChannels[] = {
+        "core", "wifi", "discovery", "cache", "xml", "soap", "control", "playback", "image", "ui"
+    };
+    AppLogger::clearAllowedChannels();
+    if (useAllowList) {
+        for (const char* channel : allowedLogChannels) {
+            AppLogger::allowChannel(channel);
+        }
+    }
+
+    // These channels are always hidden, even if included in allowed list.
+    const char* blockedLogChannels[] = {
+        "soap"
+    };
+    AppLogger::clearBlockedChannels();
+    for (const char* channel : blockedLogChannels) {
+        AppLogger::blockChannel(channel);
+    }
+
+    LOG_INFO("core", "Sonos Remote starting");
+    LOG_INFO("core", "Log level set to DEBUG");
+    LOG_INFO("core", "Allow-list mode: " + String(useAllowList ? "enabled" : "disabled"));
+    LOG_INFO("core", "Allowed channels: " + formatChannelList(allowedLogChannels, useAllowList));
+    LOG_INFO("core", "Blocked channels: " + formatChannelList(blockedLogChannels));
     deviceCache.begin();
 
-    if (!mcp.begin_I2C(0x20)) Serial.println("Error: MCP23017 not found!");
+    if (!mcp.begin_I2C(0x20)) {
+        LOG_ERROR("core", "MCP23017 not found");
+    }
 
     SonosConfig config;
     config.enableLogging = true;

@@ -1,4 +1,5 @@
 #include "DiscoveryManager.h"
+#include "AppLogger.h"
 
 DiscoveryManager::DiscoveryManager(Sonos& sonos, DeviceCache& cache)
     : _sonos(sonos), _cache(cache), _lastDiscoveryTime(0) {
@@ -19,6 +20,7 @@ DiscoveryManager::DiscoveryManager(Sonos& sonos, DeviceCache& cache)
 
 void DiscoveryManager::begin() {
     auto cached = _cache.loadDevices();
+    LOG_INFO("discovery", "Loaded " + String(cached.size()) + " cached devices");
     _devices.clear();
     for (const auto& c : cached) {
         SonosDevice dev;
@@ -35,6 +37,7 @@ bool DiscoveryManager::update() {
     if (_sonos.isDiscovering()) {
         _sonos.updateDiscovery();
         if (!_sonos.isDiscovering()) {
+            LOG_INFO("discovery", "Discovery finished with " + String(_devices.size()) + " devices");
             if (_devices.size() > 0) _cache.saveDevices(_devices);
         }
         return true;
@@ -50,7 +53,7 @@ bool DiscoveryManager::update() {
 void DiscoveryManager::forceRefresh() {
     if (WiFi.status() != WL_CONNECTED || _sonos.isDiscovering()) return;
 
-    Serial.println("[Discovery] Starting manual refresh...");
+    LOG_INFO("discovery", "Starting manual refresh");
     _lastDiscoveryTime = millis();
     _devices.clear();
     _sonos.discoverDevices();

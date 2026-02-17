@@ -68,19 +68,19 @@ SonosResult Sonos::begin() {
     if (_initialized) return SonosResult::SUCCESS;
 
     if (WiFi.status() != WL_CONNECTED) {
-        logMessage("WiFi not connected");
+        logMessage(LogLevel::ERROR, "core", "WiFi not connected");
         return SonosResult::ERROR_NETWORK;
     }
 
     if (!_udp.begin(_config.discoveryPort)) {
-        logMessage("Failed to initialize UDP");
+        logMessage(LogLevel::ERROR, "core", "Failed to initialize UDP");
         return SonosResult::ERROR_NETWORK;
     }
 
     _http.setTimeout(_config.soapTimeoutMs);
     _http.setReuse(true);
     _initialized = true;
-    logMessage("Sonos library initialized successfully");
+    logMessage(LogLevel::INFO, "core", "Sonos library initialized successfully");
     return SonosResult::SUCCESS;
 }
 
@@ -90,7 +90,7 @@ void Sonos::end() {
     _http.end();
     _devices.clear();
     _initialized = false;
-    logMessage("Sonos library ended");
+    logMessage(LogLevel::INFO, "core", "Sonos library ended");
 }
 
 // Device discovery implementation
@@ -99,7 +99,7 @@ SonosResult Sonos::discoverDevices() {
         return SonosResult::ERROR_INVALID_DEVICE;
     }
 
-    logMessage("Starting device discovery...");
+    logMessage(LogLevel::INFO, "discovery", "Starting device discovery");
 
     // Send SSDP multicast request
     IPAddress multicastIP;
@@ -110,7 +110,7 @@ SonosResult Sonos::discoverDevices() {
     bool sent = _udp.endPacket();
 
     if (!sent) {
-        logMessage("Failed to send SSDP request");
+        logMessage(LogLevel::ERROR, "discovery", "Failed to send SSDP request");
         return SonosResult::ERROR_NETWORK;
     }
 
@@ -127,7 +127,7 @@ void Sonos::updateDiscovery() {
     if (millis() - _discoveryStartTime > _config.discoveryTimeoutMs) {
         _isDiscovering = false;
         _devices = _newDevices;
-        logMessage("Discovery complete. Found " + String(_devices.size()) + " devices");
+        logMessage(LogLevel::INFO, "discovery", "Discovery complete. Found " + String(_devices.size()) + " devices");
         return;
     }
 
@@ -167,7 +167,7 @@ void Sonos::updateDiscovery() {
 
                             if (!deviceExists) {
                                 _newDevices.push_back(device);
-                                logMessage("Discovered device: " + device.name + " at " + device.ip);
+                                logMessage(LogLevel::INFO, "discovery", "Discovered device: " + device.name + " at " + device.ip);
                                 if (_deviceFoundCallback) _deviceFoundCallback(device);
                             }
                         }
@@ -194,7 +194,7 @@ bool Sonos::parseDeviceDescription(const String& xml, SonosDevice& device) {
             parseError = "must be non-negative";
         }
         if (!parsed || parsedSize < 0) {
-            logMessage("XML WARN (device description): invalid <internalSpeakerSize> value '" + speakerSize + "' (" + parseError + ")");
+            logMessage(LogLevel::WARN, "xml", "Invalid <internalSpeakerSize> value '" + speakerSize + "' (" + parseError + ")");
             return false;
         }
     }
@@ -210,12 +210,12 @@ bool Sonos::getXmlValue(const String& xml, const String& tag, String& value, con
     }
 
     value = "";
-    String level = required ? "ERROR" : "WARN";
-    String msg = "XML " + level + " (" + String(context) + "): " + result.error;
+    LogLevel level = required ? LogLevel::ERROR : LogLevel::WARN;
+    String msg = "Lookup failed in " + String(context) + ": " + result.error;
     if (required || _config.enableVerboseLogging) {
         msg += " | payload=" + summarizeXml(xml);
     }
-    logMessage(msg);
+    logMessage(level, "xml", msg);
     return false;
 }
 
@@ -225,7 +225,7 @@ bool Sonos::parseTimeToSeconds(const String& value, int& seconds, const char* co
         return true;
     }
 
-    logMessage("XML WARN (" + String(context) + "): invalid time value '" + value + "' (" + parseError + ")");
+    logMessage(LogLevel::WARN, "xml", "Invalid time value in " + String(context) + ": '" + value + "' (" + parseError + ")");
     return false;
 }
 
@@ -250,7 +250,7 @@ SonosResult Sonos::setVolume(const String& deviceIP, int volume) {
     SonosResult result = sendSoapRequest(deviceIP, "RenderingControl", "SetVolume", body, response);
 
     if (result == SonosResult::SUCCESS) {
-        logMessage("Volume set to " + String(volume) + " on " + deviceIP);
+        logMessage(LogLevel::INFO, "control", "Volume set to " + String(volume) + " on " + deviceIP);
     }
 
     return result;
@@ -272,10 +272,10 @@ SonosResult Sonos::getVolume(const String& deviceIP, int& volume) {
                 parseError = "out of expected range 0..100";
             }
             if (!parsed || volume < 0 || volume > 100) {
-                logMessage("XML ERROR (GetVolume response): invalid <CurrentVolume> value '" + volumeStr + "' (" + parseError + ")");
+                logMessage(LogLevel::ERROR, "xml", "Invalid <CurrentVolume> value '" + volumeStr + "' (" + parseError + ")");
                 return SonosResult::ERROR_SOAP_FAULT;
             }
-            logMessage("Current volume: " + String(volume) + " on " + deviceIP);
+            logMessage(LogLevel::DEBUG, "control", "Current volume: " + String(volume) + " on " + deviceIP);
         } else {
             return SonosResult::ERROR_SOAP_FAULT;
         }
@@ -316,7 +316,7 @@ SonosResult Sonos::play(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
     String response;
     SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Play", TRANSPORT_PLAY_TEMPLATE, response);
-    if (result == SonosResult::SUCCESS) logMessage("Play command sent to " + deviceIP);
+    if (result == SonosResult::SUCCESS) logMessage(LogLevel::INFO, "control", "Play command sent to " + deviceIP);
     return result;
 }
 
@@ -324,7 +324,7 @@ SonosResult Sonos::pause(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
     String response;
     SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Pause", TRANSPORT_PAUSE_TEMPLATE, response);
-    if (result == SonosResult::SUCCESS) logMessage("Pause command sent to " + deviceIP);
+    if (result == SonosResult::SUCCESS) logMessage(LogLevel::INFO, "control", "Pause command sent to " + deviceIP);
     return result;
 }
 
@@ -332,7 +332,7 @@ SonosResult Sonos::stop(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
     String response;
     SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Stop", TRANSPORT_STOP_TEMPLATE, response);
-    if (result == SonosResult::SUCCESS) logMessage("Stop command sent to " + deviceIP);
+    if (result == SonosResult::SUCCESS) logMessage(LogLevel::INFO, "control", "Stop command sent to " + deviceIP);
     return result;
 }
 
@@ -340,7 +340,7 @@ SonosResult Sonos::next(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
     String response;
     SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Next", TRANSPORT_NEXT_TEMPLATE, response);
-    if (result == SonosResult::SUCCESS) logMessage("Next command sent to " + deviceIP);
+    if (result == SonosResult::SUCCESS) logMessage(LogLevel::INFO, "control", "Next command sent to " + deviceIP);
     return result;
 }
 
@@ -348,7 +348,7 @@ SonosResult Sonos::previous(const String& deviceIP) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
     String response;
     SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "Previous", TRANSPORT_PREVIOUS_TEMPLATE, response);
-    if (result == SonosResult::SUCCESS) logMessage("Previous command sent to " + deviceIP);
+    if (result == SonosResult::SUCCESS) logMessage(LogLevel::INFO, "control", "Previous command sent to " + deviceIP);
     return result;
 }
 
@@ -360,12 +360,8 @@ SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service
     String url = "http://" + deviceIP + ":1400/MediaRenderer/" + service + "/Control";
 
     if (_config.enableVerboseLogging) {
-        Serial.println("--- SOAP REQUEST ---");
-        Serial.print("URL: "); Serial.println(url);
-        Serial.print("Action: "); Serial.println(action);
-        Serial.println("Body:");
-        Serial.println(soapBody);
-        Serial.println("--------------------");
+        logMessage(LogLevel::DEBUG, "soap", "REQUEST url=" + url + " action=" + action);
+        logMessage(LogLevel::DEBUG, "soap", "REQUEST body=" + summarizeXml(soapBody, 600));
     }
 
     _http.begin(url);
@@ -381,24 +377,20 @@ SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service
     if (httpCode == HTTP_CODE_OK) {
         response = _http.getString();
         if (_config.enableVerboseLogging) {
-            Serial.println("--- SOAP RESPONSE ---");
-            Serial.println(response);
-            Serial.println("---------------------");
+            logMessage(LogLevel::DEBUG, "soap", "RESPONSE body=" + summarizeXml(response, 600));
         }
         _http.end();
         return SonosResult::SUCCESS;
     } else if (httpCode == HTTP_CODE_INTERNAL_SERVER_ERROR) {
         response = _http.getString();
         if (_config.enableVerboseLogging) {
-            Serial.println("--- SOAP ERROR RESPONSE ---");
-            Serial.println(response);
-            Serial.println("---------------------------");
+            logMessage(LogLevel::WARN, "soap", "ERROR RESPONSE body=" + summarizeXml(response, 600));
         }
         _http.end();
         return SonosResult::ERROR_SOAP_FAULT;
     } else {
         _http.end();
-        logMessage("HTTP error: " + String(httpCode));
+        logMessage(LogLevel::ERROR, "soap", "HTTP error: " + String(httpCode) + " for " + url);
         return SonosResult::ERROR_NETWORK;
     }
 }
@@ -414,10 +406,12 @@ bool Sonos::isValidIP(const String& ip) {
     return addr.fromString(ip);
 }
 
-void Sonos::logMessage(const String& message) {
+void Sonos::logMessage(LogLevel level, const char* channel, const String& message) {
     if (_config.enableLogging) {
-        if (_logCallback) _logCallback(message);
-        else Serial.println("[Sonos] " + message);
+        AppLogger::log(level, channel, message);
+        if (_logCallback) {
+            _logCallback(String("[") + AppLogger::levelToString(level) + "] [" + channel + "] " + message);
+        }
     }
 }
 
@@ -468,14 +462,14 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
         getXmlValue(response, "TrackURI", trackUri, "GetPositionInfo response", false);
         if (trackUri.startsWith("x-rincon:")) {
             String masterUuid = trackUri.substring(9);
-            logMessage("Redirecting to coordinator: " + masterUuid);
+            logMessage(LogLevel::INFO, "playback", "Redirecting to coordinator: " + masterUuid);
 
             for (const auto& dev : _devices) {
                 if (dev.uuid.indexOf(masterUuid) != -1) {
                     return getTrackInfo(dev.ip, title, artist, album, albumArtUrl, duration);
                 }
             }
-            logMessage("Coordinator not found for UUID: " + masterUuid);
+            logMessage(LogLevel::WARN, "playback", "Coordinator not found for UUID: " + masterUuid);
             title = "Unknown Title";
             artist = "Unknown Artist";
             album = "";
@@ -519,7 +513,7 @@ SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& a
         if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") {
             parseTimeToSeconds(durationStr, duration, "TrackDuration");
         }
-        logMessage("Track info: " + title + " by " + artist + " (Art: " + albumArtUrl + ")");
+        logMessage(LogLevel::DEBUG, "playback", "Track info: " + title + " by " + artist + " (Art: " + albumArtUrl + ")");
     }
     return result;
 }
@@ -535,7 +529,7 @@ SonosResult Sonos::getPlaybackState(const String& deviceIP, String& state) {
         if (!getXmlValue(response, "CurrentTransportState", state, "GetTransportInfo response", true)) {
             return SonosResult::ERROR_SOAP_FAULT;
         }
-        logMessage("Playback state: " + state);
+        logMessage(LogLevel::DEBUG, "playback", "Playback state: " + state);
     }
 
     return result;
