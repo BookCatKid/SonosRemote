@@ -14,6 +14,7 @@
 #include "DiscoveryManager.h"
 #include "AppLogger.h"
 #include "SonosEventManager.h"
+#include "UIGlobals.h"
 
 #define TFT_CS  D3
 #define TFT_DC  D2
@@ -63,12 +64,6 @@ enum ScreenState {
 };
 
 ScreenState currentScreen = SCREEN_SPEAKER_LIST;
-
-enum WiFiState {
-    WIFI_DISCONNECTED,
-    WIFI_CONNECTING,
-    WIFI_CONNECTED
-};
 
 WiFiState wifiState = WIFI_DISCONNECTED;
 WiFiState previousWifiState = WIFI_DISCONNECTED;
@@ -345,21 +340,35 @@ void setup() {
     startWiFiConnection();
 }
 
+unsigned long lastWifiAnimMs = 0;
+
 void loop() {
     checkWiFiConnection();
     buttons.update();
     eventManager.update();
 
+    if ((wifiState == WIFI_CONNECTING && millis() - lastWifiAnimMs > 250) || wifiState != previousWifiState) {
+        lastWifiAnimMs = millis();
+        previousWifiState = wifiState;
+
+        if (currentScreen == SCREEN_SPEAKER_LIST) {
+            if (wifiState == WIFI_DISCONNECTED) {
+                speakerList.updateHeader("WiFi: Failed");
+            } else {
+                speakerList.drawHeader(); // Shows "Speakers"
+            }
+        } else if (currentScreen == SCREEN_NOW_PLAYING) {
+            if (wifiState == WIFI_DISCONNECTED) {
+                nowPlaying.drawStatusBar("WiFi: Failed");
+            } else {
+                nowPlaying.drawStatusBar(lastPlaybackState.c_str());
+            }
+        }
+    }
+
     if (currentScreen == SCREEN_SPEAKER_LIST) {
         handleSpeakerListNavigation();
         discoveryManager.update();
-
-        if (wifiState != previousWifiState) {
-            previousWifiState = wifiState;
-            if (wifiState == WIFI_CONNECTING) speakerList.updateHeader("WiFi: Connecting...");
-            else if (wifiState == WIFI_CONNECTED) speakerList.updateHeader("WiFi: Connected");
-            else if (wifiState == WIFI_DISCONNECTED) speakerList.updateHeader("WiFi: Failed");
-        }
     } else if (currentScreen == SCREEN_NOW_PLAYING) {
         handleNowPlayingNavigation();
         updateNowPlayingScreen();

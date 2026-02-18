@@ -31,6 +31,8 @@ void NowPlaying::drawStatusBar(const char* statusText) {
     int16_t x = centerX(statusText, 1);
     tft.setCursor(x, 12);
     tft.print(statusText);
+
+    tft.drawBitmap(205, 7, getWifiIcon(), 18, 16, ST77XX_WHITE);
 }
 
 void NowPlaying::drawAlbumArt() {
@@ -167,7 +169,14 @@ void NowPlaying::drawVolume(int volume) {
     tft.fillRect(56, 255, 151, 12, ST77XX_BLACK);
     tft.fillRect(56, 255, 151, 12, 0x4208);
     tft.fillRect(56, 255, w, 12, ST77XX_BLUE);
-    tft.drawBitmap(33, 253, image_volume_normal_bits, 18, 16, ST77XX_WHITE);
+
+    const unsigned char* icon = image_volume_normal_bits;
+    if (volume == 0) icon = image_volume_muted_bits;
+    else if (volume < 33) icon = image_volume_low_bits;
+    else if (volume > 66) icon = image_volume_loud_bits;
+
+    tft.fillRect(33, 253, 18, 16, ST77XX_BLACK);
+    tft.drawBitmap(33, 253, icon, 18, 16, ST77XX_WHITE);
 }
 
 void NowPlaying::drawSpeakerInfo(const char* name) {

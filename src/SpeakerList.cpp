@@ -3,6 +3,7 @@
 #include <Adafruit_ST7789.h>
 #include "SpeakerList.h"
 #include "UIGlobals.h"
+#include "Images.h"
 
 extern Adafruit_ST7789 tft;
 
@@ -13,6 +14,8 @@ void SpeakerList::drawHeader(const char* fullText) {
     tft.setTextColor(ST77XX_WHITE);
     tft.setCursor(centerX(fullText, 1), 12);
     tft.print(fullText);
+
+    tft.drawBitmap(205, 7, getWifiIcon(), 18, 16, ST77XX_WHITE);
 }
 
 void SpeakerList::drawHeader() {

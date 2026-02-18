@@ -1,4 +1,16 @@
 #include "UIGlobals.h"
+#include "Images.h"
+
+const unsigned char* getWifiIcon() {
+    if (wifiState == WIFI_CONNECTED) return image_wifi_full_bits;
+    if (wifiState == WIFI_DISCONNECTED) return image_wifi_not_connected_bits;
+
+    uint32_t m = millis() % 1000;
+    if (m < 250) return image_wifi_25_bits;
+    if (m < 500) return image_wifi_50_bits;
+    if (m < 750) return image_wifi_75_bits;
+    return image_wifi_full_bits;
+}
 
 int16_t centerX(const char* text, uint8_t textSize) {
     int16_t charWidth = 6 * textSize;
@@ -22,13 +34,13 @@ int16_t printCenteredWrapped(Adafruit_GFX& gfx, const char* text, int16_t y, uin
 
     String currentLine = "";
     int start = 0;
-    
+
     while (start < len) {
         int end = str.indexOf(' ', start);
         if (end == -1) end = len;
-        
+
         String word = str.substring(start, end);
-        
+
         if (currentLine.length() + word.length() + (currentLine.length() > 0 ? 1 : 0) <= maxChars) {
             if (currentLine.length() > 0) currentLine += " ";
             currentLine += word;
@@ -55,7 +67,7 @@ int16_t printCenteredWrapped(Adafruit_GFX& gfx, const char* text, int16_t y, uin
         }
         start = end + 1;
     }
-    
+
     if (currentLine.length() > 0) {
         int32_t lineWidth = (int32_t)currentLine.length() * charWidth;
         int16_t x = (w - lineWidth) / 2;
@@ -64,6 +76,6 @@ int16_t printCenteredWrapped(Adafruit_GFX& gfx, const char* text, int16_t y, uin
         gfx.print(currentLine);
         y += lineHeight;
     }
-    
+
     return y;
 }

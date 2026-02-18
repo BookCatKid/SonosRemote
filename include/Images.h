@@ -15,5 +15,8 @@ extern const unsigned char image_battery_full_bits[] PROGMEM;
 extern const unsigned char image_battery_charger_connected_bits[] PROGMEM;
 extern const unsigned char image_battery_charging_bits[] PROGMEM;
 
-extern const unsigned char image_wifi_bits[] PROGMEM;
+extern const unsigned char image_wifi_25_bits[] PROGMEM;
+extern const unsigned char image_wifi_50_bits[] PROGMEM;
+extern const unsigned char image_wifi_75_bits[] PROGMEM;
+extern const unsigned char image_wifi_full_bits[] PROGMEM;
 extern const unsigned char image_wifi_not_connected_bits[] PROGMEM;
