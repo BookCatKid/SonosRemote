@@ -54,7 +54,7 @@ void NowPlaying::drawAlbumArt(const char* url) {
     LOG_DEBUG("image", "Fetching album art: " + String(url));
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    
+
     int httpCode = -1;
     String urlStr = String(url);
     if (urlStr.startsWith("https://")) {
@@ -118,24 +118,30 @@ void NowPlaying::drawTrackInfo(const char* song, const char* artist, const char*
     uint8_t tS = 2;
     int16_t sL = strlen(song);
 
+    int16_t currentY = 183;
     if (sL > (240 / 12)) {
         tS = 1; tft.setTextSize(1);
         if (sL > (240 / 6)) {
-            tft.setTextWrap(true); tft.setCursor(5, 183); tft.print(song); tft.setTextWrap(false);
+            currentY = printCenteredWrapped(tft, song, currentY, 240, 1);
         } else {
-            tft.setCursor(centerX(song, 1), 183); tft.print(song);
+            tft.setCursor(centerX(song, 1), currentY); tft.print(song);
+            currentY += 10;
         }
     } else {
-        tft.setTextSize(2); tft.setCursor(centerX(song, 2), 183); tft.print(song);
+        tft.setTextSize(2); tft.setCursor(centerX(song, 2), currentY); tft.print(song);
+        currentY += 20;
     }
 
     tft.setTextSize(1); tft.setTextColor(0xAD55);
-    int aY = (tS == 1 && sL > (240 / 6)) ? 213 : 210;
-    tft.setCursor(centerX(artist, 1), aY); tft.print(artist);
+    currentY += 10;
+    currentY = printCenteredWrapped(tft, artist, currentY, 240, 1);
+
     if (album && strlen(album) > 0) {
-        tft.setCursor(centerX(album, 1), aY + 15); tft.print(album);
+        currentY += 10;
+        printCenteredWrapped(tft, album, currentY, 240, 1);
     }
 }
+
 
 static String formatTime(int seconds) {
     if (seconds < 0) seconds = 0;
