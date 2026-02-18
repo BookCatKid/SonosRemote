@@ -166,7 +166,7 @@ void handleSpeakerListNavigation() {
 
     if (selectionChanged) {
         speakerList.setSelectedIndex(selectedIndex);
-        speakerList.refreshDevices(devices);
+        speakerList.updateSelection(devices);
     }
 }
 void handleNowPlayingNavigation() {

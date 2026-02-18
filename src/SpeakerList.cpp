@@ -20,7 +20,35 @@ void SpeakerList::drawHeader() {
 }
 
 void SpeakerList::setSelectedIndex(int index) {
-    selectedIndex = index;
+    if (selectedIndex != index) {
+        previousSelectedIndex = selectedIndex;
+        selectedIndex = index;
+    }
+}
+
+void SpeakerList::updateSelection(const std::vector<SonosDevice>& devices) {
+    if (previousSelectedIndex == -1 || previousSelectedIndex == selectedIndex) {
+        return;
+    }
+
+    int yBase = 36;
+    int numDevices = (int)devices.size();
+
+    // Redraw the old selected item
+    if (previousSelectedIndex < numDevices) {
+        drawDeviceRow(previousSelectedIndex, devices[previousSelectedIndex], yBase + (previousSelectedIndex * 28), false);
+    } else if (previousSelectedIndex == numDevices) {
+        drawScanButton(yBase + (previousSelectedIndex * 28), false);
+    }
+
+    // Redraw the new selected item
+    if (selectedIndex < numDevices) {
+        drawDeviceRow(selectedIndex, devices[selectedIndex], yBase + (selectedIndex * 28), true);
+    } else if (selectedIndex == numDevices) {
+        drawScanButton(yBase + (selectedIndex * 28), true);
+    }
+
+    previousSelectedIndex = selectedIndex;
 }
 
 void SpeakerList::drawDeviceRow(int index, const SonosDevice& device, int y, bool isSelected) {
@@ -96,6 +124,7 @@ void SpeakerList::draw(const std::vector<SonosDevice>& devices) {
     tft.fillScreen(ST77XX_BLACK);
     drawHeader();
     drawDevices(devices);
+    previousSelectedIndex = selectedIndex;
 }
 
 void SpeakerList::updateHeader(const char* statusText) {
@@ -110,4 +139,5 @@ void SpeakerList::clearDeviceList() {
 void SpeakerList::refreshDevices(const std::vector<SonosDevice>& devices) {
     clearDeviceList();
     drawDevices(devices);
+    previousSelectedIndex = selectedIndex;
 }
