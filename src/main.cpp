@@ -85,9 +85,12 @@ void startWiFiConnection() {
     LOG_INFO("wifi", "Starting WiFi connection");
     WiFi.persistent(true);
     WiFi.mode(WIFI_STA);
+
 #if USE_STATIC_IP
-    WiFi.config(STATIC_IP, GATEWAY, SUBNET);
+    IPAddress dns(8, 8, 8, 8);
+    WiFi.config(STATIC_IP, GATEWAY, SUBNET, dns);
 #endif
+
     WiFi.begin(ssid, password);
     WiFi.setAutoReconnect(true);
     wifiState = WIFI_CONNECTING;
@@ -99,6 +102,7 @@ void checkWiFiConnection() {
         if (WiFi.status() == WL_CONNECTED) {
             wifiState = WIFI_CONNECTED;
             LOG_INFO("wifi", "WiFi connected: " + WiFi.localIP().toString());
+
             sonos.begin();
             eventManager.begin();
         } else if (millis() - wifiConnectStartTime > WIFI_TIMEOUT) {

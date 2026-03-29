@@ -61,6 +61,10 @@ const char* Sonos::GET_TRANSPORT_INFO_TEMPLATE =
     "<u:GetTransportInfo xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
     "<InstanceID>0</InstanceID></u:GetTransportInfo>";
 
+const char* Sonos::GET_MEDIA_INFO_TEMPLATE =
+    "<u:GetMediaInfo xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"
+    "<InstanceID>0</InstanceID></u:GetMediaInfo>";
+
 Sonos::Sonos() {}
 Sonos::Sonos(const SonosConfig& config) : _config(config) {}
 
@@ -450,112 +454,124 @@ String Sonos::getErrorString(SonosResult result) {
     }
 }
 
-SonosResult Sonos::getTrackInfo(const String& deviceIP, String& title, String& artist, String& album, String& albumArtUrl, int& duration) {
+SonosResult Sonos::getPlaybackStatus(const String& deviceIP, PlaybackStatus& status) {
     if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
 
     String response;
     SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "GetPositionInfo",
                                         GET_POSITION_INFO_TEMPLATE, response);
+    if (result != SonosResult::SUCCESS) return result;
 
-    if (result == SonosResult::SUCCESS) {
-        String trackUri;
-        getXmlValue(response, "TrackURI", trackUri, "GetPositionInfo response", false);
-        if (trackUri.startsWith("x-rincon:")) {
-            String masterUuid = trackUri.substring(9);
-            logMessage(LogLevel::INFO, "playback", "Redirecting to coordinator: " + masterUuid);
-
-            for (const auto& dev : _devices) {
-                if (dev.uuid.indexOf(masterUuid) != -1) {
-                    return getTrackInfo(dev.ip, title, artist, album, albumArtUrl, duration);
-                }
-            }
-            logMessage(LogLevel::WARN, "playback", "Coordinator not found for UUID: " + masterUuid);
-            title = "Unknown Title";
-            artist = "Unknown Artist";
-            album = "";
-            albumArtUrl = "";
-            duration = 0;
-            return SonosResult::ERROR_INVALID_DEVICE;
-        }
-
-        String metadata;
-        getXmlValue(response, "TrackMetaData", metadata, "GetPositionInfo response", false);
-        if (metadata.length() > 0 && metadata != "NOT_IMPLEMENTED") {
-            getXmlValue(metadata, "dc:title", title, "TrackMetaData", false);
-            getXmlValue(metadata, "dc:creator", artist, "TrackMetaData", false);
-            getXmlValue(metadata, "upnp:album", album, "TrackMetaData", false);
-            getXmlValue(metadata, "upnp:albumArtURI", albumArtUrl, "TrackMetaData", false);
-
-            if (title.length() == 0) {
-                String streamContent;
-                getXmlValue(metadata, "r:streamContent", streamContent, "TrackMetaData", false);
-                if (streamContent.length() > 0) {
-                    int dashPos = streamContent.indexOf(" - ");
-                    if (dashPos != -1) {
-                        artist = streamContent.substring(0, dashPos);
-                        title = streamContent.substring(dashPos + 3);
-                    } else title = streamContent;
-                }
-            }
-
-            albumArtUrl.replace("&amp;", "&");
-            if (albumArtUrl.length() > 0 && albumArtUrl.startsWith("/")) {
-                albumArtUrl = "http://" + deviceIP + ":1400" + albumArtUrl;
+    String trackUri;
+    getXmlValue(response, "TrackURI", trackUri, "GetPositionInfo response", false);
+    
+    // Check for redirection (slave speaker in a group)
+    if (trackUri.startsWith("x-rincon:")) {
+        String masterUuid = trackUri.substring(9);
+        String masterIP = "";
+        for (const auto& dev : _devices) {
+            if (dev.uuid.indexOf(masterUuid) != -1) {
+                masterIP = dev.ip;
+                break;
             }
         }
-
-        if (title.length() == 0) title = "Unknown Title";
-        if (artist.length() == 0) artist = "Unknown Artist";
-
-        String durationStr;
-        getXmlValue(response, "TrackDuration", durationStr, "GetPositionInfo response", false);
-        duration = 0;
-        if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") {
-            parseTimeToSeconds(durationStr, duration, "TrackDuration");
+        
+        if (masterIP.length() > 0 && masterIP != deviceIP) {
+            logMessage(LogLevel::DEBUG, "playback", "Redirecting AVTransport requests to master: " + masterIP);
+            // Fetch everything from the master
+            SonosResult res = getPlaybackStatus(masterIP, status);
+            return res;
         }
-        logMessage(LogLevel::DEBUG, "playback", "Track info: " + title + " by " + artist + " (Art: " + albumArtUrl + ")");
     }
-    return result;
+
+    // If we're here, we're at the coordinator or a standalone speaker
+    // 1. Parse metadata from the GetPositionInfo response we already have
+    parsePositionInfo(deviceIP, response, status);
+
+    // 2. Fetch Playback State (separate action but same service)
+    String transportResponse;
+    if (sendSoapRequest(deviceIP, "AVTransport", "GetTransportInfo",
+                        GET_TRANSPORT_INFO_TEMPLATE, transportResponse) == SonosResult::SUCCESS) {
+        getXmlValue(transportResponse, "CurrentTransportState", status.state, "GetTransportInfo response", true);
+    }
+
+    return SonosResult::SUCCESS;
 }
 
-SonosResult Sonos::getPlaybackState(const String& deviceIP, String& state) {
-    if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
+void Sonos::parsePositionInfo(const String& deviceIP, const String& response, PlaybackStatus& status) {
+    String metadata;
+    getXmlValue(response, "TrackMetaData", metadata, "GetPositionInfo response", false);
+    
+    status.title = "";
+    status.artist = "";
+    status.album = "";
+    status.albumArtUrl = "";
 
-    String response;
-    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "GetTransportInfo",
-                                        GET_TRANSPORT_INFO_TEMPLATE, response);
+    if (metadata.length() > 0 && metadata != "NOT_IMPLEMENTED") {
+        getXmlValue(metadata, "dc:title", status.title, "TrackMetaData", false);
+        getXmlValue(metadata, "dc:creator", status.artist, "TrackMetaData", false);
+        getXmlValue(metadata, "upnp:album", status.album, "TrackMetaData", false);
+        getXmlValue(metadata, "upnp:albumArtURI", status.albumArtUrl, "TrackMetaData", false);
 
-    if (result == SonosResult::SUCCESS) {
-        if (!getXmlValue(response, "CurrentTransportState", state, "GetTransportInfo response", true)) {
-            return SonosResult::ERROR_SOAP_FAULT;
+        // Handle poor metadata (radio streams)
+        bool isPoorTitle = (status.title.length() == 0 || status.title.startsWith("http") || 
+                           status.title.indexOf(".mp3") != -1 || status.title.indexOf(".m4a") != -1 ||
+                           status.title.indexOf("multi_bump") != -1);
+
+        if (isPoorTitle) {
+            String streamContent;
+            getXmlValue(metadata, "r:streamContent", streamContent, "TrackMetaData", false);
+            if (streamContent.length() > 0) {
+                int dashPos = streamContent.indexOf(" - ");
+                if (dashPos != -1) {
+                    status.artist = streamContent.substring(0, dashPos);
+                    status.title = streamContent.substring(dashPos + 3);
+                } else {
+                    status.title = streamContent;
+                }
+            }
         }
-        logMessage(LogLevel::DEBUG, "playback", "Playback state: " + state);
+
+        // Fallback to Station Name from GetMediaInfo if needed
+        isPoorTitle = (status.title.length() == 0 || status.title.startsWith("http") || 
+                       status.title.indexOf(".mp3") != -1 || status.title.indexOf(".m4a") != -1 ||
+                       status.title.indexOf("multi_bump") != -1);
+
+        if (isPoorTitle) {
+            String mediaResponse;
+            if (sendSoapRequest(deviceIP, "AVTransport", "GetMediaInfo", 
+                                GET_MEDIA_INFO_TEMPLATE, mediaResponse) == SonosResult::SUCCESS) {
+                String stationMeta;
+                if (getXmlValue(mediaResponse, "CurrentURIMetaData", stationMeta, "GetMediaInfo response", false)) {
+                    String stationTitle;
+                    if (getXmlValue(stationMeta, "dc:title", stationTitle, "StationMetaData", false)) {
+                        status.title = stationTitle;
+                    }
+                    if (status.albumArtUrl.length() == 0) {
+                        getXmlValue(stationMeta, "upnp:albumArtURI", status.albumArtUrl, "StationMetaData", false);
+                    }
+                }
+            }
+        }
+
+        if (status.albumArtUrl.length() > 0) {
+            status.albumArtUrl.replace("&amp;", "&");
+            if (status.albumArtUrl.startsWith("/")) {
+                status.albumArtUrl = "http://" + deviceIP + ":1400" + status.albumArtUrl;
+            }
+        }
     }
 
-    return result;
-}
+    if (status.title.length() == 0) status.title = "Unknown Title";
+    if (status.artist.length() == 0) status.artist = "Unknown Artist";
 
-SonosResult Sonos::getPositionInfo(const String& deviceIP, int& position, int& duration) {
-    if (!_initialized) return SonosResult::ERROR_INVALID_DEVICE;
-
-    String response;
-    SonosResult result = sendSoapRequest(deviceIP, "AVTransport", "GetPositionInfo",
-                                        GET_POSITION_INFO_TEMPLATE, response);
-
-    if (result == SonosResult::SUCCESS) {
-        String relTime;
-        getXmlValue(response, "RelTime", relTime, "GetPositionInfo response", false);
-        position = 0;
-        if (relTime.length() > 0 && relTime != "NOT_IMPLEMENTED") {
-            parseTimeToSeconds(relTime, position, "RelTime");
-        }
-
-        String durationStr;
-        getXmlValue(response, "TrackDuration", durationStr, "GetPositionInfo response", false);
-        duration = 0;
-        if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") {
-            parseTimeToSeconds(durationStr, duration, "TrackDuration");
-        }
-    }
-    return result;
+    // Position & Duration
+    String relTime, durationStr;
+    getXmlValue(response, "RelTime", relTime, "GetPositionInfo response", false);
+    getXmlValue(response, "TrackDuration", durationStr, "GetPositionInfo response", false);
+    
+    status.position = 0;
+    status.duration = 0;
+    if (relTime.length() > 0 && relTime != "NOT_IMPLEMENTED") parseTimeToSeconds(relTime, status.position, "RelTime");
+    if (durationStr.length() > 0 && durationStr != "NOT_IMPLEMENTED") parseTimeToSeconds(durationStr, status.duration, "TrackDuration");
 }

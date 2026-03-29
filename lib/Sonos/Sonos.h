@@ -27,7 +27,7 @@ struct SonosDevice {
 
 struct SonosConfig {
     uint16_t discoveryTimeoutMs = 10000;
-    uint16_t soapTimeoutMs = 10000;
+    uint16_t soapTimeoutMs = 2500;
     uint8_t maxRetries = 3;
     uint16_t discoveryPort = 1901;
     bool enableLogging = false;
@@ -63,6 +63,7 @@ private:
     static const char* TRANSPORT_PREVIOUS_TEMPLATE;
     static const char* GET_POSITION_INFO_TEMPLATE;
     static const char* GET_TRANSPORT_INFO_TEMPLATE;
+    static const char* GET_MEDIA_INFO_TEMPLATE;
     
     bool parseDeviceDescription(const String& xml, SonosDevice& device);
     bool getXmlValue(const String& xml, const String& tag, String& value, const char* context, bool required = true);
@@ -105,10 +106,17 @@ public:
     SonosResult next(const String& deviceIP);
     SonosResult previous(const String& deviceIP);
     
-    // Info
-    SonosResult getTrackInfo(const String& deviceIP, String& title, String& artist, String& album, String& albumArtUrl, int& duration);
-    SonosResult getPlaybackState(const String& deviceIP, String& state);
-    SonosResult getPositionInfo(const String& deviceIP, int& position, int& duration);
+    struct PlaybackStatus {
+        String title;
+        String artist;
+        String album;
+        String albumArtUrl;
+        int position;
+        int duration;
+        String state;
+    };
+
+    SonosResult getPlaybackStatus(const String& deviceIP, PlaybackStatus& status);
     
     void setConfig(const SonosConfig& config) { _config = config; }
     SonosConfig getConfig() const { return _config; }
@@ -122,6 +130,7 @@ public:
     void setLogCallback(LogCallback callback) { _logCallback = callback; }
     
 private:
+    void parsePositionInfo(const String& deviceIP, const String& response, PlaybackStatus& status);
     DeviceFoundCallback _deviceFoundCallback = nullptr;
     LogCallback _logCallback = nullptr;
 };

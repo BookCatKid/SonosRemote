@@ -53,12 +53,21 @@ void NowPlaying::drawAlbumArt(const char* url) {
         return;
     }
 
+    String urlStr = String(url);
+    if (urlStr.indexOf(".png") != -1) {
+        drawAlbumArt();
+        tft.fillRect(0, 140, 240, 20, ST77XX_BLACK);
+        tft.setTextColor(0x4208);
+        tft.setCursor(centerX("UNSUPPORTED", 1), 145);
+        tft.print("UNSUPPORTED");
+        return;
+    }
+
     LOG_DEBUG("image", "Fetching album art: " + String(url));
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
     int httpCode = -1;
-    String urlStr = String(url);
     if (urlStr.startsWith("https://")) {
         WiFiClientSecure sc; sc.setInsecure();
         if (http.begin(sc, urlStr)) httpCode = http.GET();

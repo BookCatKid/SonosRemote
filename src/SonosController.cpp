@@ -15,30 +15,28 @@ bool SonosController::update(const String& ip) {
         _sonos.begin();
     }
 
-    String title, artist, album, albumArtUrl;
-    int duration;
-    SonosResult res = _sonos.getTrackInfo(ip, title, artist, album, albumArtUrl, duration);
+    Sonos::PlaybackStatus status;
+    SonosResult res = _sonos.getPlaybackStatus(ip, status);
 
     if (res == SonosResult::SUCCESS) {
-        _currentTrack.title = title;
-        _currentTrack.artist = artist;
-        _currentTrack.album = album;
-        _currentTrack.albumArtUrl = albumArtUrl;
-        _currentTrack.duration = duration;
+        _currentTrack.title = status.title;
+        _currentTrack.artist = status.artist;
+        _currentTrack.album = status.album;
+        _currentTrack.albumArtUrl = status.albumArtUrl;
+        _currentTrack.position = status.position;
+        _currentTrack.duration = status.duration;
+        _currentTrack.playbackState = status.state;
 
-        int position;
-        int dur2;
-        _sonos.getPositionInfo(ip, position, dur2);
-        _currentTrack.position = position;
+        // Only update volume if not in user interaction lockout
+        if (millis() - _lastVolumeUserChangeMs > 2000) {
+            int vol;
+            if (_sonos.getVolume(ip, vol) == SonosResult::SUCCESS) {
+                _currentTrack.volume = vol;
+            }
+        }
 
-        String state;
-        _sonos.getPlaybackState(ip, state);
-        _currentTrack.playbackState = state;
-
-        int vol;
-        _sonos.getVolume(ip, vol);
-        _currentTrack.volume = vol;
-
+        _lastTickMs = millis();
+        _positionRemainderMs = 0;
         return true;
     }
 
@@ -50,21 +48,21 @@ bool SonosController::refreshPosition(const String& ip, bool refreshDuration) {
         _sonos.begin();
     }
 
-    int position = 0;
-    int duration = 0;
-    SonosResult result = _sonos.getPositionInfo(ip, position, duration);
-    if (result != SonosResult::SUCCESS) {
-        LOG_WARN("control", "Position sync failed: " + _sonos.getErrorString(result));
+    Sonos::PlaybackStatus status;
+    SonosResult res = _sonos.getPlaybackStatus(ip, status);
+    if (res != SonosResult::SUCCESS) {
+        LOG_WARN("control", "Status sync failed: " + _sonos.getErrorString(res));
         return false;
     }
 
-    _currentTrack.position = position;
-    if (refreshDuration && duration > 0) {
-        _currentTrack.duration = duration;
+    _currentTrack.position = status.position;
+    if (refreshDuration && status.duration > 0) {
+        _currentTrack.duration = status.duration;
     }
+    _currentTrack.playbackState = status.state;
     _positionRemainderMs = 0;
     _lastTickMs = millis();
-    LOG_DEBUG("control", "Synced position via getPositionInfo: " + String(position) + "s");
+    LOG_DEBUG("control", "Synced position and state via getPlaybackStatus");
     return true;
 }
 
@@ -93,15 +91,31 @@ void SonosController::previous(const String& ip) {
 }
 
 void SonosController::setVolume(const String& ip, int volume) {
-    _sonos.setVolume(ip, volume);
+    if (volume < 0) volume = 0;
+    if (volume > 100) volume = 100;
+    
+    int oldVol = _currentTrack.volume;
+    _currentTrack.volume = volume;
+    _lastVolumeUserChangeMs = millis();
+    
+    if (_sonos.setVolume(ip, volume) != SonosResult::SUCCESS) {
+        LOG_WARN("control", "Failed to set volume, rolling back");
+        _currentTrack.volume = oldVol;
+        // Reset lockout so the next poll/event can correct the UI immediately
+        _lastVolumeUserChangeMs = 0;
+    }
 }
 
 void SonosController::volumeUp(const String& ip) {
-    _sonos.increaseVolume(ip, 5);
+    int nextVol = _currentTrack.volume + 5;
+    if (nextVol > 100) nextVol = 100;
+    setVolume(ip, nextVol);
 }
 
 void SonosController::volumeDown(const String& ip) {
-    _sonos.decreaseVolume(ip, 5);
+    int nextVol = _currentTrack.volume - 5;
+    if (nextVol < 0) nextVol = 0;
+    setVolume(ip, nextVol);
 }
 
 static bool isPlayingState(const String& state) {
@@ -148,16 +162,6 @@ static String extractValOrTag(const String& xml, const String& tag) {
     return result.success ? result.value : "";
 }
 
-static String multiUnescape(String s) {
-    for (int i = 0; i < 3; i++) {
-        String old = s;
-        s.replace("&amp;", "&"); s.replace("&lt;", "<"); s.replace("&gt;", ">");
-        s.replace("&quot;", "\""); s.replace("&apos;", "'");
-        if (old == s) break;
-    }
-    return s;
-}
-
 void SonosController::parseEvent(const String& xml) {
     LOG_DEBUG("control", "Event received: " + xml);
 
@@ -178,19 +182,21 @@ void SonosController::parseEvent(const String& xml) {
     if (state.length()) _currentTrack.playbackState = state;
 
     // 3. Volume (specific handling for Master channel)
-    int volIdx = lastChange.indexOf("Volume channel=\"Master\"");
-    if (volIdx != -1) {
-        int valPos = lastChange.indexOf("val=\"", volIdx);
-        if (valPos != -1) {
-            valPos += 5;
-            int endQuote = lastChange.indexOf("\"", valPos);
-            if (endQuote != -1) {
-                _currentTrack.volume = lastChange.substring(valPos, endQuote).toInt();
+    if (millis() - _lastVolumeUserChangeMs > 2000) {
+        int volIdx = lastChange.indexOf("Volume channel=\"Master\"");
+        if (volIdx != -1) {
+            int valPos = lastChange.indexOf("val=\"", volIdx);
+            if (valPos != -1) {
+                valPos += 5;
+                int endQuote = lastChange.indexOf("\"", valPos);
+                if (endQuote != -1) {
+                    _currentTrack.volume = lastChange.substring(valPos, endQuote).toInt();
+                }
             }
+        } else {
+            String vol = extractVal(lastChange, "Volume");
+            if (vol.length()) _currentTrack.volume = vol.toInt();
         }
-    } else {
-        String vol = extractVal(lastChange, "Volume");
-        if (vol.length()) _currentTrack.volume = vol.toInt();
     }
 
     // 4. Position and duration
@@ -198,7 +204,7 @@ void SonosController::parseEvent(const String& xml) {
     if (!relTime.length()) relTime = extractValOrTag(lastChange, "RelTime");
     if (!relTime.length()) relTime = extractValOrTag(lastChange, "RelativeTimePosition");
     if (!relTime.length()) relTime = extractValOrTag(lastChange, "AbsTime");
-    if (relTime.length()) {
+    if (relTime.length() && relTime != "NOT_IMPLEMENTED") {
         int seconds;
         String error;
         if (SonosXmlParser::parseTimeToSeconds(relTime, seconds, error)) {
@@ -208,15 +214,13 @@ void SonosController::parseEvent(const String& xml) {
         } else {
             LOG_WARN("control", "Invalid event position value '" + relTime + "' (" + error + ")");
         }
-    } else {
-        LOG_DEBUG("control", "Event did not include position; continuing local clock");
     }
 
     String durationStr = extractValOrTag(lastChange, "CurrentTrackDuration");
     if (!durationStr.length()) durationStr = extractValOrTag(lastChange, "Duration");
     if (!durationStr.length()) durationStr = extractValOrTag(lastChange, "TrackDuration");
     if (!durationStr.length()) durationStr = extractValOrTag(lastChange, "CurrentMediaDuration");
-    if (durationStr.length()) {
+    if (durationStr.length() && durationStr != "NOT_IMPLEMENTED") {
         int seconds;
         String error;
         if (SonosXmlParser::parseTimeToSeconds(durationStr, seconds, error)) {
@@ -227,15 +231,15 @@ void SonosController::parseEvent(const String& xml) {
     }
 
     // 5. Metadata (title, artist, album, art)
-    String meta = extractVal(lastChange, "CurrentTrackMetaData");
-    if (meta.length()) {
-        meta = multiUnescape(meta);
-        
-        auto getTag = [](const String& m, const String& t) {
-            SonosXmlParser::XmlLookupResult r = SonosXmlParser::findTagValue(m, t);
-            return r.success ? r.value : "";
-        };
+    auto getTag = [](const String& m, const String& t) {
+        SonosXmlParser::XmlLookupResult r = SonosXmlParser::findTagValue(m, t);
+        return r.success ? r.value : "";
+    };
 
+    String meta = extractVal(lastChange, "CurrentTrackMetaData");
+    String stationMeta = extractVal(lastChange, "AVTransportURIMetaData");
+    
+    if (meta.length()) {
         String t = getTag(meta, "title");
         if (!t.length()) t = getTag(meta, "dc:title");
         
@@ -248,6 +252,21 @@ void SonosController::parseEvent(const String& xml) {
         String art = getTag(meta, "albumArtURI");
         if (!art.length()) art = getTag(meta, "upnp:albumArtURI");
 
+        // Use station metadata if track metadata is poor (radio streams)
+        bool isPoorTitle = (!t.length() || t.startsWith("http") || 
+                           t.indexOf(".mp3") != -1 || t.indexOf(".m4a") != -1 ||
+                           t.indexOf("multi_bump") != -1);
+        
+        if (isPoorTitle && stationMeta.length()) {
+            String st = getTag(stationMeta, "title");
+            if (!st.length()) st = getTag(stationMeta, "dc:title");
+            if (st.length()) t = st;
+
+            String sart = getTag(stationMeta, "albumArtURI");
+            if (!sart.length()) sart = getTag(stationMeta, "upnp:albumArtURI");
+            if (sart.length()) art = sart;
+        }
+
         if (t.length()) {
             if (t != _currentTrack.title) {
                 _currentTrack.position = 0;
@@ -258,6 +277,21 @@ void SonosController::parseEvent(const String& xml) {
         }
         if (a.length()) _currentTrack.artist = a;
         if (alb.length()) _currentTrack.album = alb;
-        if (art.length()) _currentTrack.albumArtUrl = art;
+        if (art.length()) {
+            art.replace("&amp;", "&");
+            _currentTrack.albumArtUrl = art;
+        }
+    } else if (stationMeta.length()) {
+        // Fallback for radio streams with no CurrentTrackMetaData
+        String t = getTag(stationMeta, "title");
+        if (!t.length()) t = getTag(stationMeta, "dc:title");
+        if (t.length()) _currentTrack.title = t;
+
+        String art = getTag(stationMeta, "albumArtURI");
+        if (!art.length()) art = getTag(stationMeta, "upnp:albumArtURI");
+        if (art.length()) {
+            art.replace("&amp;", "&");
+            _currentTrack.albumArtUrl = art;
+        }
     }
 }
