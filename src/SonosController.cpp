@@ -116,11 +116,11 @@ void SonosController::previous(const String& ip) {
 void SonosController::setVolume(const String& ip, int volume) {
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
-    
+
     int oldVol = _currentTrack.volume;
     _currentTrack.volume = volume;
     _lastVolumeUserChangeMs = millis();
-    
+
     if (_sonos.setVolume(ip, volume) != SonosResult::SUCCESS) {
         LOG_WARN("control", "Failed to set volume, rolling back");
         _currentTrack.volume = oldVol;
@@ -261,25 +261,25 @@ void SonosController::parseEvent(const String& xml) {
 
     String meta = extractVal(lastChange, "CurrentTrackMetaData");
     String stationMeta = extractVal(lastChange, "AVTransportURIMetaData");
-    
+
     if (meta.length()) {
         String t = getTag(meta, "title");
         if (!t.length()) t = getTag(meta, "dc:title");
-        
+
         String a = getTag(meta, "creator");
         if (!a.length()) a = getTag(meta, "dc:creator");
-        
+
         String alb = getTag(meta, "album");
         if (!alb.length()) alb = getTag(meta, "upnp:album");
-        
+
         String art = getTag(meta, "albumArtURI");
         if (!art.length()) art = getTag(meta, "upnp:albumArtURI");
 
         // Use station metadata if track metadata is poor (radio streams)
-        bool isPoorTitle = (!t.length() || t.startsWith("http") || 
+        bool isPoorTitle = (!t.length() || t.startsWith("http") ||
                            t.indexOf(".mp3") != -1 || t.indexOf(".m4a") != -1 ||
                            t.indexOf("multi_bump") != -1);
-        
+
         if (isPoorTitle && stationMeta.length()) {
             String st = getTag(stationMeta, "title");
             if (!st.length()) st = getTag(stationMeta, "dc:title");

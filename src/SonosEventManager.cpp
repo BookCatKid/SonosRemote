@@ -117,7 +117,7 @@ bool SonosEventManager::subscribe(const String& deviceIP, const String& service)
     sub.sid = "";
     sub.expiry = 0;
     sub.lastRenewal = millis();
-    
+
     if (sendSubscribeRequest(sub)) {
         _subscriptions.push_back(sub);
         LOG_INFO("events", "Subscribed to " + service + " on " + deviceIP);
@@ -138,7 +138,7 @@ bool SonosEventManager::sendSubscribeRequest(Subscription& sub, bool isRenewal) 
 
     client.println("SUBSCRIBE " + path + " HTTP/1.1");
     client.println("HOST: " + sub.ip + ":1400");
-    
+
     if (isRenewal) {
         client.println("SID: " + sub.sid);
     } else {
@@ -215,4 +215,3 @@ void SonosEventManager::unsubscribe(const String& deviceIP, const String& servic
         }
     }
 }
-

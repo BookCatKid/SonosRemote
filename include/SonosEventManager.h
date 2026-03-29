@@ -14,14 +14,14 @@ public:
     typedef std::function<void(const String& ip, const String& service, const String& lastChange)> EventCallback;
 
     SonosEventManager(int port = 8080);
-    
+
     void begin();
     void update();
-    
+
     // Subscribe to a service (e.g., "AVTransport", "RenderingControl")
     bool subscribe(const String& deviceIP, const String& service);
     void unsubscribe(const String& deviceIP, const String& service);
-    
+
     void setEventCallback(EventCallback callback) { _eventCallback = callback; }
 
 private:
@@ -32,7 +32,7 @@ private:
     int _port;
     WiFiServer _server;
     unsigned long _lastRenewCheckMs = 0;
-    
+
     struct Subscription {
         String ip;
         String service;
@@ -41,9 +41,9 @@ private:
         unsigned long lastRenewal;
     };
     std::vector<Subscription> _subscriptions;
-    
+
     EventCallback _eventCallback = nullptr;
-    
+
     void handleClient();
     bool sendSubscribeRequest(Subscription& sub, bool isRenewal = false);
 };

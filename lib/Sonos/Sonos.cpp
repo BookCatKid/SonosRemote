@@ -467,7 +467,7 @@ SonosResult Sonos::getPlaybackStatus(const String& deviceIP, PlaybackStatus& sta
 
     String trackUri;
     getXmlValue(response, "TrackURI", trackUri, "GetPositionInfo response", false);
-    
+
     // Check for redirection (slave speaker in a group)
     if (trackUri.startsWith("x-rincon:")) {
         String masterUuid = trackUri.substring(9);
@@ -478,7 +478,7 @@ SonosResult Sonos::getPlaybackStatus(const String& deviceIP, PlaybackStatus& sta
                 break;
             }
         }
-        
+
         if (masterIP.length() > 0 && masterIP != deviceIP) {
             logMessage(LogLevel::DEBUG, "playback", "Redirecting AVTransport requests to master: " + masterIP);
             // Fetch everything from the master
@@ -504,7 +504,7 @@ SonosResult Sonos::getPlaybackStatus(const String& deviceIP, PlaybackStatus& sta
 void Sonos::parsePositionInfo(const String& deviceIP, const String& response, PlaybackStatus& status) {
     String metadata;
     getXmlValue(response, "TrackMetaData", metadata, "GetPositionInfo response", false);
-    
+
     status.title = "";
     status.artist = "";
     status.album = "";
@@ -517,7 +517,7 @@ void Sonos::parsePositionInfo(const String& deviceIP, const String& response, Pl
         getXmlValue(metadata, "upnp:albumArtURI", status.albumArtUrl, "TrackMetaData", false);
 
         // Handle poor metadata (radio streams)
-        bool isPoorTitle = (status.title.length() == 0 || status.title.startsWith("http") || 
+        bool isPoorTitle = (status.title.length() == 0 || status.title.startsWith("http") ||
                            status.title.indexOf(".mp3") != -1 || status.title.indexOf(".m4a") != -1 ||
                            status.title.indexOf("multi_bump") != -1);
 
@@ -536,13 +536,13 @@ void Sonos::parsePositionInfo(const String& deviceIP, const String& response, Pl
         }
 
         // Fallback to Station Name from GetMediaInfo if needed
-        isPoorTitle = (status.title.length() == 0 || status.title.startsWith("http") || 
+        isPoorTitle = (status.title.length() == 0 || status.title.startsWith("http") ||
                        status.title.indexOf(".mp3") != -1 || status.title.indexOf(".m4a") != -1 ||
                        status.title.indexOf("multi_bump") != -1);
 
         if (isPoorTitle) {
             String mediaResponse;
-            if (sendSoapRequest(deviceIP, "AVTransport", "GetMediaInfo", 
+            if (sendSoapRequest(deviceIP, "AVTransport", "GetMediaInfo",
                                 GET_MEDIA_INFO_TEMPLATE, mediaResponse) == SonosResult::SUCCESS) {
                 String stationMeta;
                 if (getXmlValue(mediaResponse, "CurrentURIMetaData", stationMeta, "GetMediaInfo response", false)) {
@@ -572,7 +572,7 @@ void Sonos::parsePositionInfo(const String& deviceIP, const String& response, Pl
     String relTime, durationStr;
     getXmlValue(response, "RelTime", relTime, "GetPositionInfo response", false);
     getXmlValue(response, "TrackDuration", durationStr, "GetPositionInfo response", false);
-    
+
     status.position = 0;
     status.duration = 0;
     if (relTime.length() > 0 && relTime != "NOT_IMPLEMENTED") parseTimeToSeconds(relTime, status.position, "RelTime");
