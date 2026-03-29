@@ -52,6 +52,7 @@ bool SonosController::refreshPosition(const String& ip, bool refreshDuration) {
     SonosResult res = _sonos.getPlaybackStatus(ip, status);
     if (res != SonosResult::SUCCESS) {
         LOG_WARN("control", "Status sync failed: " + _sonos.getErrorString(res));
+        _lastTickMs = millis(); // Still update tick so local interpolation continues
         return false;
     }
 

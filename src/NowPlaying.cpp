@@ -36,14 +36,14 @@ void NowPlaying::drawStatusBar(const char* statusText) {
 }
 
 void NowPlaying::drawAlbumArt() {
-    int centerX = 120, centerY = 105;
-    tft.fillRect(0, 58, 240, 94, ST77XX_BLACK);
+    int centerX = 120, centerY = 109;
+    tft.fillRect(0, 58, 240, 102, ST77XX_BLACK);
     tft.drawCircle(centerX, centerY, 40, 0x4208);
     tft.drawCircle(centerX, centerY, 38, 0x4208);
     tft.drawCircle(centerX, centerY, 12, 0xAD55);
     tft.fillCircle(centerX, centerY, 3, ST77XX_WHITE);
     tft.setTextColor(0x4208);
-    tft.setCursor(centerX - 20, centerY + 45);
+    tft.setCursor(centerX - 20, centerY + 40);
     tft.print("NO ART");
 }
 
@@ -101,9 +101,9 @@ void NowPlaying::drawAlbumArt(const char* url) {
                         int drawW = w / scale;
                         int drawH = h / scale;
                         int x = (240 - drawW) / 2;
-                        int y = 58 + (94 - drawH) / 2;
+                        int y = 58 + (102 - drawH) / 2;
 
-                        tft.fillRect(0, 58, 240, 94, ST77XX_BLACK);
+                        tft.fillRect(0, 58, 240, 102, ST77XX_BLACK);
                         TJpgDec.drawJpg(x, y, buffer, len);
                     } else {
                         LOG_WARN("image", "Failed to decode JPG metadata");
