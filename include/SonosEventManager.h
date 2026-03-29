@@ -25,8 +25,13 @@ public:
     void setEventCallback(EventCallback callback) { _eventCallback = callback; }
 
 private:
+    static constexpr unsigned long RENEW_CHECK_INTERVAL_MS = 1000;
+    static constexpr unsigned long SUB_RENEW_INTERVAL_MS = 270000;
+    static constexpr size_t MAX_NOTIFY_BODY_BYTES = 16384;
+
     int _port;
     WiFiServer _server;
+    unsigned long _lastRenewCheckMs = 0;
     
     struct Subscription {
         String ip;

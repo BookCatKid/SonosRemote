@@ -4,12 +4,34 @@
 #include <TJpg_Decoder.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "NowPlaying.h"
 #include "UIGlobals.h"
 #include "AppLogger.h"
 #include "Images.h"
 
 extern Adafruit_ST7789 tft;
+
+namespace {
+constexpr int MAX_ALBUM_ART_BYTES = 180 * 1024;
+constexpr uint16_t ALBUM_ART_HTTP_TIMEOUT_MS = 5000;
+constexpr uint16_t ALBUM_ART_IDLE_TIMEOUT_MS = 3000;
+constexpr size_t ALBUM_ART_INITIAL_UNKNOWN_SIZE = 8192;
+portMUX_TYPE g_albumArtMux = portMUX_INITIALIZER_UNLOCKED;
+
+void formatTimeText(int seconds, char* out, size_t outSize) {
+    if (seconds < 0) seconds = 0;
+    int h = seconds / 3600;
+    int m = (seconds % 3600) / 60;
+    int s = seconds % 60;
+    if (h > 0) {
+        snprintf(out, outSize, "%d:%02d:%02d", h, m, s);
+    } else {
+        snprintf(out, outSize, "%02d:%02d", m, s);
+    }
+}
+}
 
 static bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
     if (y >= tft.height()) return false;
@@ -18,9 +40,85 @@ static bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* b
 }
 
 void NowPlaying::drawStatic() {
+    // New screen session: clear URL cache so re-entering now playing shows loading state again.
+    _requestedAlbumArtUrl = "";
+    _loadingAlbumArtUrl = "";
+    _displayedAlbumArtUrl = "";
+
+    portENTER_CRITICAL(&g_albumArtMux);
+    if (_albumArtBuffer != nullptr) {
+        free(_albumArtBuffer);
+        _albumArtBuffer = nullptr;
+    }
+    _albumArtLength = 0;
+    _albumArtReady = false;
+    _albumArtFailed = false;
+    portEXIT_CRITICAL(&g_albumArtMux);
+
     tft.fillScreen(ST77XX_BLACK);
     drawStatusBar("Ready");
     drawAlbumArt();
+}
+
+void NowPlaying::update() {
+    bool ready = false;
+    bool failed = false;
+    uint8_t* buffer = nullptr;
+    size_t len = 0;
+
+    portENTER_CRITICAL(&g_albumArtMux);
+    ready = _albumArtReady;
+    failed = _albumArtFailed;
+    if (ready) {
+        buffer = _albumArtBuffer;
+        len = _albumArtLength;
+        _albumArtBuffer = nullptr;
+        _albumArtLength = 0;
+        _albumArtReady = false;
+        _albumArtFailed = false;
+    } else if (failed) {
+        _albumArtFailed = false;
+    }
+    portEXIT_CRITICAL(&g_albumArtMux);
+
+    if (ready && buffer != nullptr && len > 0) {
+        if (_loadingAlbumArtUrl != _requestedAlbumArtUrl) {
+            free(buffer);
+            startAlbumArtDownloadIfNeeded();
+            return;
+        }
+
+        TJpgDec.setCallback(tft_output);
+        uint16_t w = 0;
+        uint16_t h = 0;
+        if (TJpgDec.getJpgSize(&w, &h, buffer, len) == JDR_OK) {
+            uint8_t scale = 1;
+            if (w > 320 || h > 320) scale = 8;
+            else if (w > 160 || h > 160) scale = 4;
+            else if (w > 80 || h > 80) scale = 2;
+
+            TJpgDec.setJpgScale(scale);
+            int drawW = w / scale;
+            int drawH = h / scale;
+            int x = (240 - drawW) / 2;
+            int y = 58 + (102 - drawH) / 2;
+
+            tft.fillRect(0, 58, 240, 102, ST77XX_BLACK);
+            TJpgDec.drawJpg(x, y, buffer, len);
+            _displayedAlbumArtUrl = _loadingAlbumArtUrl;
+        } else {
+            LOG_WARN("image", "Failed to decode downloaded JPG");
+            drawAlbumArt();
+            _displayedAlbumArtUrl = _loadingAlbumArtUrl;
+        }
+        free(buffer);
+    } else if (failed) {
+        LOG_WARN("image", "Album art download failed");
+        drawAlbumArt();
+        _displayedAlbumArtUrl = _loadingAlbumArtUrl;
+    }
+
+    startAlbumArtDownloadIfNeeded();
 }
 
 void NowPlaying::drawStatusBar(const char* statusText) {
@@ -47,14 +145,183 @@ void NowPlaying::drawAlbumArt() {
     tft.print("NO ART");
 }
 
+void NowPlaying::drawLoadingAlbumArt() {
+    tft.fillRect(0, 58, 240, 102, ST77XX_BLACK);
+    tft.drawRect(20, 70, 200, 78, 0x4208);
+    tft.drawRect(22, 72, 196, 74, 0x4208);
+    tft.setTextColor(0x7BEF);
+    tft.setFont();
+    tft.setTextSize(1);
+    tft.setCursor(centerX("LOADING ART...", 1), 100);
+    tft.print("LOADING ART...");
+    tft.setTextColor(0x4208);
+    tft.setCursor(centerX("Please wait", 1), 116);
+    tft.print("Please wait");
+}
+
+void NowPlaying::startAlbumArtDownloadIfNeeded() {
+    if (_albumArtDownloadInProgress) return;
+    if (_requestedAlbumArtUrl.length() == 0) return;
+    if (_requestedAlbumArtUrl == _displayedAlbumArtUrl) return;
+
+    _loadingAlbumArtUrl = _requestedAlbumArtUrl;
+    _albumArtDownloadInProgress = true;
+
+    BaseType_t created = xTaskCreatePinnedToCore(
+        &NowPlaying::albumArtDownloadTask,
+        "art_dl",
+        8192,
+        this,
+        1,
+        &_albumArtTaskHandle,
+        0
+    );
+
+    if (created != pdPASS) {
+        _albumArtDownloadInProgress = false;
+        _albumArtTaskHandle = nullptr;
+        LOG_WARN("image", "Failed to create album art task");
+    }
+}
+
+void NowPlaying::albumArtDownloadTask(void* param) {
+    NowPlaying* self = static_cast<NowPlaying*>(param);
+    if (self == nullptr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    String url = self->_loadingAlbumArtUrl;
+    int httpCode = -1;
+    uint8_t* buffer = nullptr;
+    size_t len = 0;
+    bool success = false;
+
+    HTTPClient http;
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setTimeout(ALBUM_ART_HTTP_TIMEOUT_MS);
+
+    if (strncmp(url.c_str(), "https://", 8) == 0) {
+        WiFiClientSecure secureClient;
+        secureClient.setInsecure();
+        if (http.begin(secureClient, url)) {
+            httpCode = http.GET();
+        }
+    } else {
+        if (http.begin(url)) {
+            httpCode = http.GET();
+        }
+    }
+
+    if (httpCode == HTTP_CODE_OK) {
+        size_t capacity = ALBUM_ART_INITIAL_UNKNOWN_SIZE;
+        size_t freeHeap = ESP.getFreeHeap();
+        if (freeHeap < capacity + 8192) {
+            LOG_WARN("image", "Insufficient heap for art. freeHeap=" + String(freeHeap));
+        } else {
+            buffer = static_cast<uint8_t*>(malloc(capacity));
+            if (buffer == nullptr) {
+                LOG_WARN("image", "Failed to allocate album art buffer");
+            } else {
+                Stream& stream = http.getStream();
+                unsigned long lastDataMs = millis();
+
+                while (true) {
+                    int availableBytes = stream.available();
+                    while (availableBytes > 0) {
+                        if (len >= MAX_ALBUM_ART_BYTES) {
+                            LOG_WARN("image", "Album art exceeds max supported bytes");
+                            break;
+                        }
+
+                        if (len >= capacity) {
+                            size_t nextCapacity = capacity * 2;
+                            if (nextCapacity > MAX_ALBUM_ART_BYTES) {
+                                nextCapacity = MAX_ALBUM_ART_BYTES;
+                            }
+                            if (nextCapacity <= capacity) {
+                                break;
+                            }
+
+                            uint8_t* grown = static_cast<uint8_t*>(realloc(buffer, nextCapacity));
+                            if (grown == nullptr) {
+                                LOG_WARN("image", "Failed to grow album art buffer");
+                                break;
+                            }
+                            buffer = grown;
+                            capacity = nextCapacity;
+                        }
+
+                        size_t room = capacity - len;
+                        size_t toRead = room;
+                        if (toRead > static_cast<size_t>(availableBytes)) {
+                            toRead = static_cast<size_t>(availableBytes);
+                        }
+
+                        int read = stream.readBytes(buffer + len, toRead);
+                        if (read <= 0) {
+                            break;
+                        }
+
+                        len += static_cast<size_t>(read);
+                        availableBytes = stream.available();
+                        lastDataMs = millis();
+                    }
+
+                    bool connected = http.connected();
+                    if ((!connected && stream.available() == 0) || len >= MAX_ALBUM_ART_BYTES) {
+                        break;
+                    }
+
+                    if (millis() - lastDataMs > ALBUM_ART_IDLE_TIMEOUT_MS) {
+                        LOG_WARN("image", "Album art stream idle timeout");
+                        break;
+                    }
+
+                    delay(1);
+                }
+
+                if (len > 0) {
+                    success = true;
+                    uint8_t* shrink = static_cast<uint8_t*>(realloc(buffer, len));
+                    if (shrink != nullptr) {
+                        buffer = shrink;
+                    }
+                } else {
+                    free(buffer);
+                    buffer = nullptr;
+                }
+            }
+        }
+    } else {
+        LOG_WARN("image", "Album art fetch failed. HTTP code=" + String(httpCode));
+    }
+
+    http.end();
+
+    portENTER_CRITICAL(&g_albumArtMux);
+    self->_albumArtBuffer = buffer;
+    self->_albumArtLength = len;
+    self->_albumArtReady = success;
+    self->_albumArtFailed = !success;
+    self->_albumArtDownloadInProgress = false;
+    self->_albumArtTaskHandle = nullptr;
+    portEXIT_CRITICAL(&g_albumArtMux);
+
+    vTaskDelete(nullptr);
+}
+
 void NowPlaying::drawAlbumArt(const char* url) {
     if (url == nullptr || strlen(url) == 0) {
+        _requestedAlbumArtUrl = "";
+        _displayedAlbumArtUrl = "";
         drawAlbumArt();
         return;
     }
 
-    String urlStr = String(url);
-    if (urlStr.indexOf(".png") != -1) {
+    if (strstr(url, ".png") != nullptr || strstr(url, ".PNG") != nullptr) {
+        _requestedAlbumArtUrl = "";
+        _displayedAlbumArtUrl = "";
         drawAlbumArt();
         tft.fillRect(0, 140, 240, 20, ST77XX_BLACK);
         tft.setTextColor(0x4208);
@@ -63,63 +330,15 @@ void NowPlaying::drawAlbumArt(const char* url) {
         return;
     }
 
-    LOG_DEBUG("image", "Fetching album art: " + String(url));
-    HTTPClient http;
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-    int httpCode = -1;
-    if (urlStr.startsWith("https://")) {
-        WiFiClientSecure sc; sc.setInsecure();
-        if (http.begin(sc, urlStr)) httpCode = http.GET();
-    } else {
-        if (http.begin(urlStr)) httpCode = http.GET();
+    String requested = String(url);
+    if (requested == _displayedAlbumArtUrl || requested == _requestedAlbumArtUrl) {
+        return;
     }
 
-    if (httpCode == HTTP_CODE_OK) {
-        int len = http.getSize();
-        if (len > 0) {
-            size_t freeHeap = ESP.getFreeHeap();
-            if (freeHeap < (size_t)len + 8192) {
-                LOG_WARN("image", "Not enough memory for image. freeHeap=" + String(freeHeap) + " size=" + String(len));
-                drawAlbumArt();
-                http.end();
-                return;
-            }
-
-            uint8_t* buffer = (uint8_t*)malloc(len);
-            if (buffer) {
-                if (http.getStream().readBytes(buffer, len) > 0) {
-                    TJpgDec.setCallback(tft_output);
-                    uint16_t w, h;
-                    if (TJpgDec.getJpgSize(&w, &h, buffer, len) == JDR_OK) {
-                        uint8_t scale = 1;
-                        if (w > 320 || h > 320) scale = 8;
-                        else if (w > 160 || h > 160) scale = 4;
-                        else if (w > 80 || h > 80) scale = 2;
-
-                        TJpgDec.setJpgScale(scale);
-                        int drawW = w / scale;
-                        int drawH = h / scale;
-                        int x = (240 - drawW) / 2;
-                        int y = 58 + (102 - drawH) / 2;
-
-                        tft.fillRect(0, 58, 240, 102, ST77XX_BLACK);
-                        TJpgDec.drawJpg(x, y, buffer, len);
-                    } else {
-                        LOG_WARN("image", "Failed to decode JPG metadata");
-                        drawAlbumArt();
-                    }
-                }
-                free(buffer);
-            } else {
-                LOG_WARN("image", "Failed to allocate image buffer");
-            }
-        }
-    } else {
-        LOG_WARN("image", "Album art fetch failed. HTTP code=" + String(httpCode));
-        drawAlbumArt();
-    }
-    http.end();
+    _requestedAlbumArtUrl = requested;
+    drawLoadingAlbumArt();
+    LOG_DEBUG("image", "Queued album art fetch: " + requested);
+    startAlbumArtDownloadIfNeeded();
 }
 
 void NowPlaying::drawTrackInfo(const char* song, const char* artist, const char* album) {
@@ -154,23 +373,21 @@ void NowPlaying::drawTrackInfo(const char* song, const char* artist, const char*
 }
 
 
-static String formatTime(int seconds) {
-    if (seconds < 0) seconds = 0;
-    int m = seconds / 60, s = seconds % 60;
-    char buf[10]; sprintf(buf, "%02d:%02d", m, s);
-    return String(buf);
-}
-
 void NowPlaying::drawProgressBar(int position, int duration) {
     int progress = (duration > 0) ? (position * 100) / duration : 0;
     if (progress > 100) progress = 100;
     int bW = 130, x = 10, y = 162, h = 10;
     tft.fillRect(x, y, bW, h, 0x4208);
     tft.fillRect(x, y, map(progress, 0, 100, 0, bW), h, 0x5FF3);
-    String tT = formatTime(position) + " / " + formatTime(duration);
+    char posText[12];
+    char durText[12];
+    char timeline[28];
+    formatTimeText(position, posText, sizeof(posText));
+    formatTimeText(duration, durText, sizeof(durText));
+    snprintf(timeline, sizeof(timeline), "%s / %s", posText, durText);
     tft.setTextColor(ST77XX_WHITE);
     tft.fillRect(x + bW + 5, y - 2, 240 - (x + bW + 5), h + 4, ST77XX_BLACK);
-    tft.setFont(); tft.setTextSize(1); tft.setCursor(x + bW + 10, y + 1); tft.print(tT);
+    tft.setFont(); tft.setTextSize(1); tft.setCursor(x + bW + 10, y + 1); tft.print(timeline);
 }
 
 void NowPlaying::drawVolume(int volume) {

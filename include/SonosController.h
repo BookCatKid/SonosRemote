@@ -39,4 +39,5 @@ private:
     unsigned long _lastTickMs = 0;
     unsigned long _positionRemainderMs = 0;
     unsigned long _lastVolumeUserChangeMs = 0;
+    unsigned long _lastStatusSyncWarnMs = 0;
 };

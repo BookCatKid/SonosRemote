@@ -41,6 +41,7 @@ ButtonHandler buttons(mcp, BTN_UP, BTN_DOWN, BTN_CLICK, BTN_VUP, BTN_VDOWN);
 
 int selectedIndex = 0;
 IPAddress selectedDeviceIP;
+String selectedDeviceIPStr;
 
 // UI tracking
 String lastAlbumArtUrl = "";
@@ -52,8 +53,10 @@ int lastPositionSeconds = -1;
 int lastDurationSeconds = -1;
 int lastVolume = -1;
 bool forcePositionSync = false;
+bool forceUiRefresh = false;
 unsigned long lastPositionSyncMs = 0;
 const unsigned long POSITION_SYNC_INTERVAL_MS = 20000;
+const unsigned long NOW_PLAYING_UI_INTERVAL_MS = 80;
 bool needsInitialNowPlayingFetch = false;
 unsigned long lastInitialFetchAttemptMs = 0;
 const unsigned long INITIAL_FETCH_RETRY_INTERVAL_MS = 3000;
@@ -136,15 +139,17 @@ void handleSpeakerListNavigation() {
     if (buttons.clickPressed()) {
         if (selectedIndex < (int)devices.size()) {
             selectedDeviceIP.fromString(devices[selectedIndex].ip.c_str());
+            selectedDeviceIPStr = devices[selectedIndex].ip;
             currentScreen = SCREEN_NOW_PLAYING;
             forcePositionSync = true;
+            forceUiRefresh = true;
             lastPositionSyncMs = 0;
             needsInitialNowPlayingFetch = true;
             lastInitialFetchAttemptMs = 0;
 
             // Subscribe to events
-            eventManager.subscribe(selectedDeviceIP.toString(), "AVTransport");
-            eventManager.subscribe(selectedDeviceIP.toString(), "RenderingControl");
+            eventManager.subscribe(selectedDeviceIPStr, "AVTransport");
+            eventManager.subscribe(selectedDeviceIPStr, "RenderingControl");
 
             // Full redraw reset
             lastAlbumArtUrl = lastTitle = lastArtist = lastAlbum = lastPlaybackState = "";
@@ -170,32 +175,34 @@ void handleSpeakerListNavigation() {
 }
 void handleNowPlayingNavigation() {
     if (buttons.clickPressed()) {
-        sonosController.togglePlayPause(selectedDeviceIP.toString());
+        sonosController.togglePlayPause(selectedDeviceIPStr);
         return;
     }
 
     if (buttons.clickLongPressed()) {
-        eventManager.unsubscribe(selectedDeviceIP.toString(), "AVTransport");
-        eventManager.unsubscribe(selectedDeviceIP.toString(), "RenderingControl");
+        eventManager.unsubscribe(selectedDeviceIPStr, "AVTransport");
+        eventManager.unsubscribe(selectedDeviceIPStr, "RenderingControl");
         forcePositionSync = false;
+        forceUiRefresh = false;
         needsInitialNowPlayingFetch = false;
+        selectedDeviceIPStr = "";
         currentScreen = SCREEN_SPEAKER_LIST;
         speakerList.draw(discoveryManager.getDevices());
         return;
     }
 
     if (buttons.upPressed()) {
-        sonosController.next(selectedDeviceIP.toString());
+        sonosController.next(selectedDeviceIPStr);
     }
     if (buttons.downPressed()) {
-        sonosController.previous(selectedDeviceIP.toString());
+        sonosController.previous(selectedDeviceIPStr);
     }
 
     if (buttons.volUpPressed()) {
-        sonosController.volumeUp(selectedDeviceIP.toString());
+        sonosController.volumeUp(selectedDeviceIPStr);
     }
     if (buttons.volDownPressed()) {
-        sonosController.volumeDown(selectedDeviceIP.toString());
+        sonosController.volumeDown(selectedDeviceIPStr);
     }
 }
 
@@ -207,9 +214,10 @@ void updateNowPlayingScreen() {
     if (needsInitialNowPlayingFetch &&
         (lastInitialFetchAttemptMs == 0 || nowMs - lastInitialFetchAttemptMs >= INITIAL_FETCH_RETRY_INTERVAL_MS)) {
         lastInitialFetchAttemptMs = nowMs;
-        if (sonosController.update(selectedDeviceIP.toString())) {
+        if (sonosController.update(selectedDeviceIPStr)) {
             needsInitialNowPlayingFetch = false;
             forcePositionSync = false;
+            forceUiRefresh = true;
             lastPositionSyncMs = nowMs;
             LOG_DEBUG("control", "Initial now-playing fetch succeeded");
         } else {
@@ -222,11 +230,19 @@ void updateNowPlayingScreen() {
     bool periodicSyncDue = isPlaying && (nowMs - lastPositionSyncMs >= POSITION_SYNC_INTERVAL_MS);
 
     if (forcePositionSync || periodicSyncDue) {
-        if (sonosController.refreshPosition(selectedDeviceIP.toString(), true)) {
+        if (sonosController.refreshPosition(selectedDeviceIPStr, true)) {
             lastPositionSyncMs = nowMs;
+            forceUiRefresh = true;
         }
         forcePositionSync = false;
     }
+
+    static unsigned long lastUiUpdateMs = 0;
+    if (!forceUiRefresh && nowMs - lastUiUpdateMs < NOW_PLAYING_UI_INTERVAL_MS) {
+        return;
+    }
+    forceUiRefresh = false;
+    lastUiUpdateMs = nowMs;
 
     const auto& data = sonosController.getTrackData();
 
@@ -260,12 +276,13 @@ void updateNowPlayingScreen() {
 void setup() {
     WiFi.mode(WIFI_STA); // Initialize stack early
     Serial.begin(115200);
-    AppLogger::begin(Serial, LogLevel::DEBUG);
+    constexpr bool kPerformanceMode = false;
+    AppLogger::begin(Serial, kPerformanceMode ? LogLevel::INFO : LogLevel::DEBUG);
     AppLogger::setEnabled(true);
 
     // `useAllowList=false` means allow all channels (except blocked ones below).
     // `useAllowList=true` means only channels in this list are shown.
-    const bool useAllowList = true;
+    const bool useAllowList = false;
     const char* allowedLogChannels[] = {
         "core", "wifi", "discovery", "cache", "xml", "soap", "control", "playback", "image", "ui", "events"
     };
@@ -278,7 +295,7 @@ void setup() {
 
     // These channels are always hidden, even if included in allowed list.
     const char* blockedLogChannels[] = {
-        "soap"
+        "none"
     };
     AppLogger::clearBlockedChannels();
     for (const char* channel : blockedLogChannels) {
@@ -299,6 +316,8 @@ void setup() {
     SonosConfig config;
     config.enableLogging = true;
     config.enableVerboseLogging = true;
+    config.soapTimeoutMs = 2500;
+    config.maxRetries = 3;
     sonos.setConfig(config);
 
     pinMode(TFT_BL, OUTPUT);
@@ -316,12 +335,13 @@ void setup() {
 
     eventManager.setEventCallback([](const String& ip, const String& service, const String& data) {
         (void)service;
-        if (currentScreen != SCREEN_NOW_PLAYING || ip != selectedDeviceIP.toString()) {
+        if (currentScreen != SCREEN_NOW_PLAYING || ip != selectedDeviceIPStr) {
             return;
         }
 
         LOG_DEBUG("core", "Event received from " + ip);
         sonosController.parseEvent(data);
+        forceUiRefresh = true;
 
         // Ensure album art URL is absolute if relative
         auto& track = const_cast<TrackData&>(sonosController.getTrackData());
@@ -347,12 +367,19 @@ void setup() {
 unsigned long lastWifiAnimMs = 0;
 
 void loop() {
+    unsigned long nowMs = millis();
+
     checkWiFiConnection();
     buttons.update();
-    eventManager.update();
 
-    if ((wifiState == WIFI_CONNECTING && millis() - lastWifiAnimMs > 250) || wifiState != previousWifiState) {
-        lastWifiAnimMs = millis();
+    static unsigned long lastEventUpdateMs = 0;
+    if (nowMs - lastEventUpdateMs >= 5) {
+        eventManager.update();
+        lastEventUpdateMs = nowMs;
+    }
+
+    if ((wifiState == WIFI_CONNECTING && nowMs - lastWifiAnimMs > 250) || wifiState != previousWifiState) {
+        lastWifiAnimMs = nowMs;
         previousWifiState = wifiState;
 
         if (currentScreen == SCREEN_SPEAKER_LIST) {
@@ -375,6 +402,9 @@ void loop() {
         discoveryManager.update();
     } else if (currentScreen == SCREEN_NOW_PLAYING) {
         handleNowPlayingNavigation();
+        nowPlaying.update();
         updateNowPlayingScreen();
     }
+
+    delay(1);
 }

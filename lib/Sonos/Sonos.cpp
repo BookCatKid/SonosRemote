@@ -82,7 +82,8 @@ SonosResult Sonos::begin() {
     }
 
     _http.setTimeout(_config.soapTimeoutMs);
-    _http.setReuse(true);
+    // Keep-alive reuse is fragile on some Sonos endpoints and can cause repeated read timeouts.
+    _http.setReuse(false);
     _initialized = true;
     logMessage(LogLevel::INFO, "core", "Sonos library initialized successfully");
     return SonosResult::SUCCESS;
@@ -375,7 +376,9 @@ SonosResult Sonos::sendSoapRequest(const String& deviceIP, const String& service
     int httpCode = -1;
     for (int retry = 0; retry < _config.maxRetries && httpCode != HTTP_CODE_OK; retry++) {
         httpCode = _http.POST(soapBody);
-        if (httpCode != HTTP_CODE_OK) delay(100 * (retry + 1));
+        if (httpCode != HTTP_CODE_OK && retry + 1 < _config.maxRetries) {
+            delay(100 * (retry + 1));
+        }
     }
 
     if (httpCode == HTTP_CODE_OK) {

@@ -51,10 +51,29 @@ bool SonosController::refreshPosition(const String& ip, bool refreshDuration) {
     Sonos::PlaybackStatus status;
     SonosResult res = _sonos.getPlaybackStatus(ip, status);
     if (res != SonosResult::SUCCESS) {
-        LOG_WARN("control", "Status sync failed: " + _sonos.getErrorString(res));
+        unsigned long nowMs = millis();
+        if (_lastStatusSyncWarnMs == 0 || nowMs - _lastStatusSyncWarnMs >= 15000) {
+            LOG_WARN("control", "Status sync failed: " + _sonos.getErrorString(res));
+            _lastStatusSyncWarnMs = nowMs;
+        } else {
+            LOG_DEBUG("control", "Status sync failed (suppressed): " + _sonos.getErrorString(res));
+        }
         _lastTickMs = millis(); // Still update tick so local interpolation continues
         return false;
     }
+
+    bool hadTrackData = _currentTrack.title.length() > 0 || _currentTrack.artist.length() > 0;
+    bool trackMetadataChanged = hadTrackData &&
+        (status.title != _currentTrack.title ||
+         status.artist != _currentTrack.artist ||
+         status.album != _currentTrack.album ||
+         status.albumArtUrl != _currentTrack.albumArtUrl);
+
+    // Keep metadata fresh during periodic syncs so missed events don't leave stale tracks on screen.
+    _currentTrack.title = status.title;
+    _currentTrack.artist = status.artist;
+    _currentTrack.album = status.album;
+    _currentTrack.albumArtUrl = status.albumArtUrl;
 
     _currentTrack.position = status.position;
     if (refreshDuration && status.duration > 0) {
@@ -63,6 +82,9 @@ bool SonosController::refreshPosition(const String& ip, bool refreshDuration) {
     _currentTrack.playbackState = status.state;
     _positionRemainderMs = 0;
     _lastTickMs = millis();
+    if (trackMetadataChanged) {
+        LOG_INFO("control", "Recovered track metadata via polling after a missed/late event");
+    }
     LOG_DEBUG("control", "Synced position and state via getPlaybackStatus");
     return true;
 }
@@ -164,7 +186,7 @@ static String extractValOrTag(const String& xml, const String& tag) {
 }
 
 void SonosController::parseEvent(const String& xml) {
-    LOG_DEBUG("control", "Event received: " + xml);
+    LOG_DEBUG("control", "Event received (bytes=" + String(xml.length()) + ")");
 
     // 1. Extract LastChange payload. Parser decoding handles one pass safely.
     String lastChange;
